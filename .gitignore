@@ -12,5 +12,4 @@ data/raw/*
 data/splits/*
 !data/splits/.gitkeep
 
-.claude
-CLAUDE.md
+data.zip

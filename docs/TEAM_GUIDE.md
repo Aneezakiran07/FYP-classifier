@@ -1,6 +1,6 @@
 # Team guide: how Aneeza and Fatima work on the classifier
 
-Who owns what, what each folder does, and who does which task. Keep it in the repo at `docs/team_guide.md`.
+Who owns what, what each folder does, and who does which task. Keep it in the repo at `docs/TEAM_GUIDE.md`.
 Two files outrank it: `docs/classifier_design_from_report.md` (the report design) and `CLAUDE.md`.
 Dataset decisions live in `docs/decisions.md`.
 
@@ -56,7 +56,7 @@ If you need something from the other side, ask for a function in the contract be
 - `report.py`: per layer counts and the accuracy table.
 
 **Everything else**
-- `data/samples/`, `data/labels/`, `data/splits/`, `data/raw/`: data. Big files are gitignored, so share them outside git. The final dataset is `data/raw/final_dataset.jsonl` with 4,119 PRs.
+- `data/samples/`, `data/labels/`, `data/splits/`, `data/raw/`: data. Small samples in `data/samples/` are committed so we both run the same sample. Big files are gitignored, so share them outside git. The final dataset is `data/raw/final_dataset.jsonl` with 4,119 PRs.
 - `outputs/`: classifier output, not committed.
 - `scripts/`: helper scripts. Scripts may import from both sides.
 - `docs/`: this guide, the report design, decisions.
@@ -77,7 +77,7 @@ Design points from the report that both of us must respect:
 - Stage 4 uses a router prompt first. For semantic regions a 7 logic tests prompt runs in fixed order. The first met test wins and the validator confirms it. **The model never assigns a label itself.**
 - `capped` and `llm-error` are statuses with no label.
 - confluent-interference is recorded as unknown while context lines are unavailable.
-- One record per region, joined by `pr_key` plus `conflict_index`. Our block is overwritten on rerun and runs are resumable.
+- One record per region, joined by pull request, file path and conflict index (report Figure 6.6). Our block is overwritten on rerun and runs are resumable.
 
 ## 5. How we change shared files
 1. Say in chat which shared file you want to change and why.
@@ -157,6 +157,6 @@ Follow the `label-guidelines` skill. One label per region. When two labels fit, 
 ## 11. Using Claude Code on this repo
 Each of us opens the repo in our own editor and runs our own Claude Code session. At the start of a session, say which person you are and which tasks are yours, for example:
 
-> I am Aneeza and I own src/classifier/llm. My tasks are A1 to A9 in docs/team_guide.md. Do not edit src/classifier/rules. Start with task A1.
+> I am Aneeza and I own src/classifier/llm. My tasks are A1 to A9 in docs/TEAM_GUIDE.md. Do not edit src/classifier/rules. Start with task A1.
 
 Fatima does the same with her tasks F1 to F8. Shared files need the agreement process in section 5.

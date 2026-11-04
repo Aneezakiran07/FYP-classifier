@@ -84,6 +84,13 @@ def uncertain(reason, priority="high", unknown_reason="ambiguous", candidate_lab
     }
 
 def classify_with_llm(file_path, ours_text, theirs_text, eq, region):
+    # Also reports whether the logic prompt ran so its hash is recorded only then
+    logic_prompts_before = STATS["prompt_b"]
+    result = run_two_prompts(file_path, ours_text, theirs_text, eq, region)
+    result["logic_prompt_ran"] = STATS["prompt_b"] > logic_prompts_before
+    return result
+
+def run_two_prompts(file_path, ours_text, theirs_text, eq, region):
     # Prompt A decides structural or semantic, prompt B only runs for semantic.
     # Output labels are v3 taxonomy labels in every branch.
     #

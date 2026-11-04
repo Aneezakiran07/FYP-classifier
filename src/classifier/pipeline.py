@@ -4,13 +4,27 @@
 
 import json
 import os
+import re
 from datetime import datetime, timezone
+from functools import lru_cache
+from importlib import metadata
+from pathlib import Path
 
-from classifier.llm import classify_llm
+from classifier.llm import classify_llm, prompt_builder
 from classifier.llm.classify_llm import classify_with_llm
 from classifier.report import RUN_LOG, STATS, print_report, reset_stats
 from classifier.rules.ast_gate import GATE_LABELS
 from classifier.rules.patterns import ClassifyInput, classify_deterministic_named
+from classifier.schema import (
+    Region,
+    Result,
+    SOURCE_MODEL,
+    SOURCE_RULE,
+    STATUS_CAPPED,
+    STATUS_CLASSIFIED,
+    bare_label,
+    strip_family,
+)
 
 try:
     from classifier.rules.ast_diff import compute_ast_equivalence
@@ -28,72 +42,133 @@ LARGE_PR_KEY_REGION_WARNING_THRESHOLD = 15
 # calls count toward this, patterns and the ast gate are free
 PER_FILE_API_CALL_CAP = 15
 
-# The label and reason used for a region that got capped instead of sent
-# to the model, kept as constants so the counting script can match exactly
-CAPPED_LABEL = "not-reviewed"
-CAPPED_REASON = "high-volume file, not individually reviewed beyond first 15 regions"
+# The reason used for a region that got capped instead of sent to the
+# model, kept as a constant so the counting script can match exactly
+CAPPED_REASON = "call-ceiling"
 
-def build_output_record(
-    pr_key,
-    conflict_index,
-    effective_index,
-    file_path,
-    attempt_number,
-    timestamp,
-    label,
-    confidence,
-    reason,
-    capped=False,
-    secondary=None,
-    logic_subtype=None,
-    evidence=None,
-    missing_context=None,
-    steps=None,
-    needs_verification=False,
-    verification_priority="normal",
-    base_available=True,
-    graph_unavailable=True,
-    policy_resolved=False,
-    unknown_reason=None,
-    candidate_labels=None,
-    gate=None,
-):
-    # This builds one output line in a single place so every code path
-    # writes the same set of fields. The v2 schema is preserved exactly,
-    # followed by the two verification fields added in v2, followed by the
-    # six fields added in v3.
+# The stage of the report that each existing pattern belongs to
+STAGE_BY_PATTERN = {
+    "OutOfScope": 0,
+    "NoMarkers": 1,
+    "SameChange": 1,
+    "OneSideChange": 1,
+    "WhitespaceOnly": 2,
+    "CommentsOnly": 2,
+    "ImportRestructure": 2,
+    "ReorderOnly": 2,
+    "ValueOnlyChange": 3,
+    "Lockfile": 3,
+    "PackageManifest": 3,
+    "ConfigSchema": 3,
+    "ImportPathOnly": 3,
+    "DisjointEdits": 3,
+}
+AST_GATE_STAGE = 2
+LLM_STAGE = 4
+
+# The default value of each older field kept inside the classifier block
+OLD_FIELD_DEFAULTS = {
+    "secondary": None,
+    "logic_subtype": None,
+    "confidence": None,
+    "evidence": None,
+    "missing_context": None,
+    "steps": [],
+    "capped": False,
+    "needs_verification": False,
+    "verification_priority": "normal",
+    "base_available": True,
+    "graph_unavailable": True,
+    "policy_resolved": False,
+    "unknown_reason": None,
+    "candidate_labels": None,
+    "gate": None,
+}
+
+
+@lru_cache(maxsize=1)
+def component_version():
+    # The source file is read first because installed metadata can be out of date
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    if pyproject.exists():
+        match = re.search(r'^version = "(.+)"$', pyproject.read_text(encoding="utf-8"), re.M)
+        if match:
+            return match.group(1)
+    return metadata.version("ast-git-resolver")
+
+
+def build_provenance(layer, logic_prompt_ran=False):
+    # A region decided by a rule carries no model name and no prompt hashes
+    provenance = {"component_version": component_version()}
+    if layer == "llm":
+        provenance["model_name"] = classify_llm.MODEL_NAME
+        provenance["router_prompt_hash"] = prompt_builder.system_prompt_hash("A")
+        provenance["logic_prompt_hash"] = (
+            prompt_builder.system_prompt_hash("B") if logic_prompt_ran else None
+        )
+    return provenance
+
+
+def find_stage(layer, detail):
+    if layer == "pattern":
+        return STAGE_BY_PATTERN[detail]
+    return AST_GATE_STAGE if layer == "ast" else LLM_STAGE
+
+
+def old_fields(values, timestamp):
+    # Keeps the older fields in the block and gives candidate labels bare names
+    fields = {name: values.get(name, default) for name, default in OLD_FIELD_DEFAULTS.items()}
+    if fields["candidate_labels"]:
+        fields["candidate_labels"] = [strip_family(name) for name in fields["candidate_labels"]]
+    fields["timestamp"] = timestamp
+    return fields
+
+
+def build_classified_block(region, result, layer, detail, timestamp):
+    return Result(
+        status=STATUS_CLASSIFIED,
+        stage=find_stage(layer, detail),
+        source=SOURCE_MODEL if layer == "llm" else SOURCE_RULE,
+        label=bare_label(result["label"]),
+        reason=result["reason"],
+        base_state=region.base_state,
+        input_hash=region.input_hash,
+        provenance=build_provenance(layer, result.get("logic_prompt_ran", False)),
+        extra=old_fields(result, timestamp),
+    ).to_block()
+
+
+def build_capped_block(region, timestamp):
+    # A capped region never reached a rule that decided it or a model
+    values = {"capped": True, "confidence": "low", "base_available": bool(region.base_text)}
+    return Result(
+        status=STATUS_CAPPED,
+        stage=LLM_STAGE,
+        reason=CAPPED_REASON,
+        base_state=region.base_state,
+        input_hash=region.input_hash,
+        provenance={"component_version": component_version(), "model_name": None},
+        extra=old_fields(values, timestamp),
+    ).to_block()
+
+
+def build_output_record(region, block):
+    # One line per region, the join key sits outside the block of each stage
     return {
-        "pr_key": pr_key,
-        "conflict_index": conflict_index,
-        "effective_index": effective_index,
-        "file_path": file_path,
-        "label": label,
-        "secondary": secondary,
-        "logic_subtype": logic_subtype,
-        "confidence": confidence,
-        "evidence": evidence,
-        "missing_context": missing_context,
-        "steps": steps if steps is not None else [],
-        "reason": reason,
-        "capped": capped,
-        "attempt_number": attempt_number,
-        "model": classify_llm.MODEL_NAME,
-        "timestamp": timestamp,
-        "needs_verification": needs_verification,
-        "verification_priority": verification_priority,
-        "base_available": base_available,
-        "graph_unavailable": graph_unavailable,
-        "policy_resolved": policy_resolved,
-        "unknown_reason": unknown_reason,
-        "candidate_labels": candidate_labels,
-        "gate": gate,
+        "pr_key": region.pr_key,
+        "file_path": region.file_path,
+        "conflict_index": region.conflict_index,
+        "effective_index": region.effective_index,
+        "classifier": block,
     }
 
-def read_jsonl_counts(output_path):
-    # Shared reader for the two resume helpers below
-    result = {}
+
+def read_records(output_path):
+    # Reads the output into one record per key and the latest record wins
+    # A broken line from an interrupted run is ignored so that region runs again
+    records = {}
     if not os.path.exists(output_path):
-        return result
+        return records
     with open(output_path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -103,21 +178,23 @@ def read_jsonl_counts(output_path):
                 record = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            conflict_index = record.get("conflict_index")
-            effective_index = (
-                conflict_index if conflict_index is not None else record.get("effective_index")
-            )
-            key = (record.get("pr_key"), record.get("file_path"), effective_index)
-            result[key] = result.get(key, 0) + 1
-    return result
+            key = (record.get("pr_key"), record.get("file_path"), record.get("effective_index"))
+            records[key] = record
+    return records
 
-def load_already_labeled(output_path):
-    # Which regions are done, this is what makes the script resumable
-    return set(read_jsonl_counts(output_path))
 
-def load_attempt_counts(output_path):
-    # How many prior entries exist per region, used to number repeated runs
-    return read_jsonl_counts(output_path)
+def compact_output(output_path):
+    # Rewrites the output so a rerun leaves exactly one record per key
+    # The new file replaces the old one in one step so a crash cannot lose records
+    if not os.path.exists(output_path):
+        return
+    records = read_records(output_path)
+    temporary_path = f"{output_path}.tmp"
+    with open(temporary_path, "w", encoding="utf-8") as f:
+        for record in records.values():
+            f.write(json.dumps(record) + "\n")
+    os.replace(temporary_path, output_path)
+
 
 def classify_region(file_path, ours_text, theirs_text, base_text=None, region=None, allow_llm=True):
     # Three layers in order of cost. Text patterns first, then the ast gate,
@@ -167,96 +244,78 @@ def classify_region(file_path, ours_text, theirs_text, base_text=None, region=No
     llm_result["gate"] = eq.equivalence if eq is not None else None
     return llm_result, "llm", None
 
-def process_region(pr_key, region_position, region, outfile, api_call_counts_by_file,
-                   already_labeled, attempt_counts, rows_mode):
-    conflict_index = region.get("conflict_index")
-    file_path = region.get("file_path")
-    # A no_markers deletion region has no conflict_index of its own, so its
-    # position in the regions list is used instead, this keeps two deletions
-    # in the same pr_key from colliding onto the same key
-    effective_index = (
-        conflict_index if conflict_index is not None else f"no_markers_{region_position}"
-    )
-    key = (pr_key, file_path, effective_index)
 
-    # Rows mode always runs fresh, normal mode skips what is already done
-    if not rows_mode and key in already_labeled:
+def count_decision(block, layer, detail):
+    # Updates the run counters and returns the text shown for this region
+    shown = block["label"]
+    if layer == "pattern":
+        STATS["deterministic"] += 1
+        STATS["by_pattern"][detail] = STATS["by_pattern"].get(detail, 0) + 1
+        shown += f" ({detail})"
+    elif layer == "ast":
+        STATS["ast"] += 1
+        STATS["by_equivalence"][detail] = STATS["by_equivalence"].get(detail, 0) + 1
+        shown += f" (ast {detail})"
+    if block["needs_verification"]:
+        STATS["needs_verification"] += 1
+        shown += " needs_verification"
+    return shown
+
+
+def process_region(pr_key, region_position, raw_region, outfile, api_call_counts_by_file,
+                   finished_keys):
+    region = Region.from_raw(pr_key, region_position, raw_region)
+    if region.key in finished_keys:
         return
 
-    attempt_number = attempt_counts.get(key, 0) + 1
     timestamp = datetime.now(timezone.utc).isoformat()
-    ours_text = region.get("ours_text") or ""
-    theirs_text = region.get("theirs_text") or ""
 
     # Only model calls count toward the cap, so patterns and the ast gate
     # still run on a file that has already used up its share
-    calls_so_far_for_file = api_call_counts_by_file.get(file_path, 0)
+    calls_so_far_for_file = api_call_counts_by_file.get(region.file_path, 0)
     allow_llm = calls_so_far_for_file < PER_FILE_API_CALL_CAP
 
     result, layer, detail = classify_region(
-        file_path, ours_text, theirs_text, region.get("base_text"), region, allow_llm
+        region.file_path, region.ours_text, region.theirs_text, region.base_text,
+        raw_region, allow_llm,
     )
 
     STATS["total"] += 1
     if result is None:
         STATS["capped"] += 1
-        output_record = build_output_record(
-            pr_key, conflict_index, effective_index, file_path, attempt_number, timestamp,
-            label=CAPPED_LABEL, confidence="low", reason=CAPPED_REASON, capped=True,
-        )
-        shown = f"{CAPPED_LABEL} (per file cap)"
+        block = build_capped_block(region, timestamp)
+        shown = f"{STATUS_CAPPED} (per file cap)"
     else:
-        output_record = build_output_record(
-            pr_key, conflict_index, effective_index, file_path, attempt_number, timestamp,
-            **result,
-        )
-        shown = result["label"]
-        if layer == "pattern":
-            STATS["deterministic"] += 1
-            STATS["by_pattern"][detail] = STATS["by_pattern"].get(detail, 0) + 1
-            shown += f" ({detail})"
-        elif layer == "ast":
-            STATS["ast"] += 1
-            STATS["by_equivalence"][detail] = STATS["by_equivalence"].get(detail, 0) + 1
-            shown += f" (ast {detail})"
-        else:
-            api_call_counts_by_file[file_path] = calls_so_far_for_file + 1
-        if output_record["needs_verification"]:
-            STATS["needs_verification"] += 1
-            shown += " needs_verification"
+        block = build_classified_block(region, result, layer, detail, timestamp)
+        shown = count_decision(block, layer, detail)
+        if layer == "llm":
+            api_call_counts_by_file[region.file_path] = calls_so_far_for_file + 1
 
     RUN_LOG.append({
-        "key": (pr_key, file_path, conflict_index), "layer": layer,
-        "label": output_record["label"], "subtype": output_record["logic_subtype"],
+        "key": (pr_key, region.file_path, region.conflict_index), "layer": layer,
+        "label": block.get("label"), "subtype": block["logic_subtype"],
     })
-    outfile.write(json.dumps(output_record) + "\n")
+    outfile.write(json.dumps(build_output_record(region, block)) + "\n")
     outfile.flush()
 
-    if rows_mode:
-        print(f"{pr_key} {file_path} region {effective_index} attempt {attempt_number}: {shown}")
-    else:
-        print(f"{pr_key} {file_path} region {effective_index}: {shown}")
-    already_labeled.add(key)
-    attempt_counts[key] = attempt_number
+    print(f"{pr_key} {region.file_path} region {region.effective_index}: {shown}")
+    finished_keys.add(region.key)
 
-def run_one(input_path, output_path, rows_mode, row_start, row_end):
+
+def run_one(input_path, output_path, rerun=False):
+    # A normal run skips finished keys so it can resume after stopping
+    # A rerun processes every key in the input and overwrites only those keys
     reset_stats()
-    if rows_mode:
-        print(f"Rows mode is on, selecting lines {row_start} to {row_end}, always running fresh calls and appending, existing output is not skipped")
-        already_labeled = set()
+    compact_output(output_path)
+    finished_keys = set() if rerun else set(read_records(output_path))
+    if rerun:
+        print("Rerun is on, every region in the input is classified again and overwritten")
     else:
-        already_labeled = load_already_labeled(output_path)
-        print(f"Found {len(already_labeled)} regions already labeled, they will be skipped")
-    attempt_counts = load_attempt_counts(output_path)
+        print(f"Found {len(finished_keys)} regions already labeled, they will be skipped")
 
     with open(input_path, "r", encoding="utf-8") as infile, \
             open(output_path, "a", encoding="utf-8") as outfile:
-        for line_number, line in enumerate(infile, start=1):
-            if rows_mode:
-                if line_number < row_start:
-                    continue
-                if line_number > row_end:
-                    break
+        for line in infile:
             line = line.strip()
             if not line:
                 continue
@@ -270,6 +329,6 @@ def run_one(input_path, output_path, rows_mode, row_start, row_end):
             api_call_counts_by_file = {}
             for region_position, region in enumerate(regions):
                 process_region(pr_key, region_position, region, outfile,
-                               api_call_counts_by_file, already_labeled,
-                               attempt_counts, rows_mode)
+                               api_call_counts_by_file, finished_keys)
+    compact_output(output_path)
     print_report()

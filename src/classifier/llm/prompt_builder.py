@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 from classifier.llm.prompts import (
@@ -46,6 +47,11 @@ def build_system(prompt, examples=None):
     text = PROMPT_A if prompt == "A" else PROMPT_B
     examples = load_few_shot() if examples is None else examples
     return text.replace("<<EXAMPLES>>", format_examples(examples, prompt)).strip()
+
+
+def system_prompt_hash(prompt):
+    # Hashes one final system prompt including its few shot examples
+    return hashlib.sha256(build_system(prompt).encode("utf-8")).hexdigest()
 
 
 def build_user_message(file_path, ours_text, theirs_text, eq=None):

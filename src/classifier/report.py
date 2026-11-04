@@ -4,6 +4,8 @@
 import json
 import os
 
+from classifier.schema import strip_family
+
 
 # Counters for the end of run report, reset at the start of every model run
 STATS = {}
@@ -53,7 +55,9 @@ def load_ground_truth(labels_path):
             if not line.strip():
                 continue
             row = json.loads(line)
-            truth[(row.get("pr_key"), row.get("file_path"), row.get("conflict_index"))] = row.get("true_label")
+            # Hand labels may still carry the old family prefix
+            true_label = strip_family(row.get("true_label"))
+            truth[(row.get("pr_key"), row.get("file_path"), row.get("conflict_index"))] = true_label
     return truth
 
 def matches_truth(entry, true_label):

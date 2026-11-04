@@ -10,24 +10,6 @@ from classifier.pipeline import run_one
 from classifier.report import load_ground_truth, print_table, summarize_model
 
 
-def parse_row_range(rows_arg):
-    # Parse a string like ten dash fifty into a start and end line number
-    # Both ends are one indexed and inclusive
-    try:
-        start_str, end_str = rows_arg.split("-")
-        start = int(start_str.strip())
-        end = int(end_str.strip())
-    except (ValueError, AttributeError):
-        raise ValueError(
-            f"Invalid --rows value {rows_arg!r}, expected a format like 10-50"
-        )
-    if start < 1 or end < start:
-        raise ValueError(
-            f"Invalid --rows value {rows_arg!r}, start must be at least 1 "
-            "and end must be at least start"
-        )
-    return start, end
-
 def output_path_for_model(output_path, model):
     # out.jsonl becomes out.model-name.jsonl
     root, ext = os.path.splitext(output_path)
@@ -50,24 +32,18 @@ def main(argv=None):
                         help="Hand labels jsonl used for the accuracy columns, defaults to sample_labels.jsonl next to the input")
     parser.add_argument("--max-retries", type=int, default=0,
                         help="Give up on a failing model call after this many tries, 0 retries forever")
-    parser.add_argument("--rows", type=str, default=None,
-                        help=("Select pr_keys by one indexed line position in the input file, "
-                              "for example 10-50. When passed, the script switches to append "
-                              "only mode, it always runs fresh calls and never skips existing "
-                              "output, recording an attempt_number, model, and timestamp on "
-                              "each output line."))
+    parser.add_argument("--rerun", action="store_true",
+                        help="Classify every region in the input again and overwrite only those records")
     args = parser.parse_args(argv)
 
     classify_llm.DELAY_BETWEEN_CALLS_SECONDS = args.delay
     classify_llm.MAX_CALL_RETRIES = args.max_retries
-    rows_mode = args.rows is not None
-    row_start, row_end = parse_row_range(args.rows) if rows_mode else (None, None)
     print(f"Using a delay of {classify_llm.DELAY_BETWEEN_CALLS_SECONDS} seconds between calls")
 
     if not args.models:
         classify_llm.MODEL_NAME = args.model
         print(f"Using model {classify_llm.MODEL_NAME}")
-        run_one(args.input_path, args.output_path, rows_mode, row_start, row_end)
+        run_one(args.input_path, args.output_path, args.rerun)
         print("Done")
         return
 
@@ -85,7 +61,7 @@ def main(argv=None):
         classify_llm.MODEL_NAME = model
         model_output = output_path_for_model(args.output_path, model)
         print(f"\n=== {model} -> {model_output}")
-        run_one(args.input_path, model_output, rows_mode, row_start, row_end)
+        run_one(args.input_path, model_output, args.rerun)
         rows.append(summarize_model(model, truth))
 
     print()

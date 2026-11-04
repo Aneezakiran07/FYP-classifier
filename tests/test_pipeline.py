@@ -1,6 +1,6 @@
 import json
 
-from classifier import cli
+from classifier import cli, pipeline
 from classifier.llm import providers
 
 
@@ -64,23 +64,113 @@ def test_models_flag_writes_one_file_per_model_and_a_table(tmp_path, monkeypatch
     assert bad[3:5] == ["0/2", "0%"]
 
 
-def test_output_schema_carries_the_two_verification_and_six_v3_fields(tmp_path, monkeypatch):
+REPORT_FIELDS = ["status", "reason", "stage", "source", "base_state", "input_hash", "trace",
+                 "confirming_test", "changed_names", "joint_use_lines", "provenance"]
+OLD_FIELDS = ["secondary", "logic_subtype", "confidence", "evidence", "missing_context", "steps",
+              "capped", "needs_verification", "verification_priority", "base_available",
+              "graph_unavailable", "policy_resolved", "unknown_reason", "candidate_labels",
+              "gate", "timestamp"]
+
+
+def read_rows(path):
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def test_output_record_holds_the_join_key_and_the_classifier_block(tmp_path, monkeypatch):
     write_inputs(tmp_path)
     install_fakes(monkeypatch)
     cli.main([str(tmp_path / "in.jsonl"), str(tmp_path / "out.jsonl"), "--models", "bad", "--delay", "0"])
-    rows = [json.loads(l) for l in (tmp_path / "out.bad.jsonl").read_text().splitlines()]
-    v2_keys = ["pr_key", "conflict_index", "effective_index", "file_path", "label", "secondary",
-               "logic_subtype", "confidence", "evidence", "missing_context", "steps", "reason",
-               "capped", "attempt_number", "model", "timestamp"]
-    v2_extra = ["needs_verification", "verification_priority"]
-    v3_extra = ["base_available", "graph_unavailable", "policy_resolved",
-                "unknown_reason", "candidate_labels", "gate"]
+    rows = read_rows(tmp_path / "out.bad.jsonl")
     for row in rows:
-        assert list(row) == v2_keys + v2_extra + v3_extra
+        assert list(row) == ["pr_key", "file_path", "conflict_index", "effective_index", "classifier"]
+        assert list(row["classifier"]) == ["label"] + REPORT_FIELDS + OLD_FIELDS
+        assert row["classifier"]["status"] == "classified"
     # Both model-classified regions from "bad" now route to verification
     # because other at low confidence becomes unknown under the v3 rule.
-    flagged = [r for r in rows if r["needs_verification"]]
-    assert len(flagged) == 2 and all(r["verification_priority"] == "high" for r in flagged)
+    flagged = [r["classifier"] for r in rows if r["classifier"]["needs_verification"]]
+    assert len(flagged) == 2 and all(b["verification_priority"] == "high" for b in flagged)
+
+
+def test_rule_block_has_no_model_name_and_model_block_does(tmp_path, monkeypatch):
+    write_inputs(tmp_path)
+    install_fakes(monkeypatch)
+    out = tmp_path / "out.jsonl"
+    cli.main([str(tmp_path / "in.jsonl"), str(out), "--model", "good", "--delay", "0"])
+    rule, model, _ = [row["classifier"] for row in read_rows(out)]
+
+    assert rule["label"] == "lockfile"
+    assert (rule["stage"], rule["source"]) == (3, "rule")
+    assert list(rule["provenance"]) == ["component_version"]
+
+    assert model["label"] == "assignment-override"
+    assert (model["stage"], model["source"]) == (4, "model")
+    assert model["provenance"]["model_name"] == "good"
+    assert len(model["provenance"]["router_prompt_hash"]) == 64
+    assert len(model["provenance"]["logic_prompt_hash"]) == 64
+    assert model["provenance"]["component_version"] == "0.1.0"
+    assert (model["base_state"], len(model["input_hash"])) == ("missing", 64)
+
+
+def test_capped_region_is_recorded_with_no_label(tmp_path, monkeypatch):
+    regions = [{"conflict_index": i, "ours_text": f"x = {i}", "theirs_text": f"x = {i + 9}",
+                "file_path": "src/one.ts"} for i in range(2)]
+    (tmp_path / "in.jsonl").write_text(json.dumps({"pr_key": "o/r#1", "regions": regions}) + "\n")
+    install_fakes(monkeypatch)
+    monkeypatch.setattr(pipeline, "PER_FILE_API_CALL_CAP", 1)
+    out = tmp_path / "out.jsonl"
+    cli.main([str(tmp_path / "in.jsonl"), str(out), "--model", "good", "--delay", "0"])
+    capped = read_rows(out)[1]["classifier"]
+    assert "label" not in capped
+    assert capped["status"] == "capped" and capped["capped"] is True
+    assert capped["reason"] == "call-ceiling"
+    assert capped["source"] is None and capped["stage"] == 4
+    assert capped["provenance"] == {"component_version": "0.1.0", "model_name": None}
+
+
+def test_router_only_region_has_no_logic_prompt_hash(tmp_path, monkeypatch):
+    write_inputs(tmp_path)
+    install_fakes(monkeypatch)
+    # The fake model answers unknown at the router so the logic prompt never runs
+    monkeypatch.setattr(providers, "call_model",
+                        lambda model, system, user: json.dumps({"kind": "unknown", "reason": "not sure"}))
+    out = tmp_path / "out.jsonl"
+    cli.main([str(tmp_path / "in.jsonl"), str(out), "--model", "good", "--delay", "0"])
+    block = read_rows(out)[1]["classifier"]
+    assert block["source"] == "model"
+    assert len(block["provenance"]["router_prompt_hash"]) == 64
+    assert block["provenance"]["logic_prompt_hash"] is None
+
+
+def test_rerun_overwrites_only_the_keys_in_its_input(tmp_path, monkeypatch):
+    write_inputs(tmp_path)
+    install_fakes(monkeypatch)
+    out = tmp_path / "out.jsonl"
+    cli.main([str(tmp_path / "in.jsonl"), str(out), "--model", "good", "--delay", "0"])
+    before = read_rows(out)
+
+    one_region = json.loads((tmp_path / "in.jsonl").read_text())
+    one_region["regions"] = one_region["regions"][1:2]
+    (tmp_path / "part.jsonl").write_text(json.dumps(one_region) + "\n")
+    cli.main([str(tmp_path / "part.jsonl"), str(out), "--model", "bad", "--delay", "0", "--rerun"])
+    after = read_rows(out)
+
+    assert len(after) == 3
+    assert after[0] == before[0] and after[2] == before[2]
+    assert after[1]["file_path"] == "src/one.ts"
+    assert after[1]["classifier"]["provenance"]["model_name"] == "bad"
+
+
+def test_resume_ignores_a_line_broken_by_a_crash(tmp_path, monkeypatch):
+    write_inputs(tmp_path)
+    install_fakes(monkeypatch)
+    out = tmp_path / "out.jsonl"
+    args = [str(tmp_path / "in.jsonl"), str(out), "--model", "good", "--delay", "0"]
+    cli.main(args)
+    rows = out.read_text().splitlines()
+    out.write_text("\n".join(rows[:2]) + "\n" + rows[2][:20])
+    cli.main(args)
+    keys = [(r["pr_key"], r["file_path"], r["effective_index"]) for r in read_rows(out)]
+    assert len(keys) == len(set(keys)) == 3
 
 
 def test_single_model_run_keeps_the_output_path(tmp_path, monkeypatch, capsys):

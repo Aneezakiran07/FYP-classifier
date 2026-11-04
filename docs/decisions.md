@@ -75,3 +75,35 @@ The report says "conflict files" without defining it. Suggested half sentence: "
 - `smoke_test.jsonl` is classifier output, so it was placed in `outputs/`.
 - Three tests already failed in the original code and were left alone: one expects 11 patterns but there are 14, and two whitespace cases are now decided by the pattern layer before the AST gate. They need a decision from the owners.
 - Dev set is for tuning. The test set is touched only for the final numbers.
+
+## D3. Decisions made for the Phase 2 gap list (2026-11-05)
+
+Answered by Aneeza. Everything that touches `rules/` or a shared file still needs Fatima's review before merge.
+
+### Record format, applied in step 1
+- Join key: `pr_key`, `file_path` and `effective_index` (report Figure 6.6). `pr_key` plus `conflict_index` alone has 11,081 duplicates in the final dataset.
+- Labels use the bare names of Table 5.1. Rule patterns still emit the old prefixed names until Fatima approves changing them, and the pipeline converts them when it writes the block.
+- Status of a normal labeled region: `classified`.
+- Base state values: `present`, `empty`, `missing`, `no-markers`.
+- Provenance: component version from `pyproject.toml`, plus the SHA-256 of each final system prompt including few shot examples. Rule decided regions carry no model name.
+- Input hash: the report does not define it, so this is our choice. SHA-256 over file path, conflict type, base, ours and theirs, with absent values kept as null. Identical regions can share a hash, which is fine because the join key differs.
+- Capped block: stage 4, source null, model name null, reason `call-ceiling`.
+- Small samples are committed, so `data/samples/` is in git. Big files such as `data/raw/` stay out.
+- Reruns: one block per key, and a rerun overwrites it (report 6.5). `--rows` and `attempt_number` are dropped. `--rerun` overwrites the keys in its input, so a partial rerun or a smoke test uses a smaller input file.
+
+### Open, for Fatima to review
+- **Source of a structural label confirmed by a rule after the model's hint.** Aneeza chose `model`. Not built until steps 4 and 5.
+- **Two prompt hashes.** The report says "the prompt hash" in the singular, and there are two prompts. Aneeza chose two fields, so a router only region is not affected by a change to the logic prompt. `router_prompt_hash` is recorded on every region that went to the model. `logic_prompt_hash` is recorded only when the logic prompt ran, and is null otherwise.
+
+### Answered, applied in later steps
+- Stage 0 (step 2): the report scopes to TypeScript, so `.js`, `.jsx`, `.mjs` and `.css` are out of scope unless they are config files. Any dependency lockfile counts, including `bun.lock`, `bun.lockb` and `Cargo.lock`. The prose list is to be proposed.
+- Deletions (step 2): a deletion on one side is `business-logic-conflict`, not `one-side-change` (Table 5.1 and 5.3.2). The other no-marker regions are proposed as `unknown` with a reason, to be agreed with Fatima.
+- Trace (step 2): tests after the deciding one appear as skipped with a reason.
+- Base in prompts (step 4): the prompts include the base. An empty base means both sides are additions. With no base the direction is unknown.
+- Proposed for step 4: no test met gives `unknown` with reason `no-test-met`, and the low confidence threshold is dropped because the validator is the gate.
+- Call ceiling (step 6): counts model calls per file, and the count is recorded in the block so it survives resume. The limit of 15 is a placeholder.
+- Retries (step 6): format errors are retried once with a stricter reminder. Transport errors are retried with backoff up to a bounded number, to be proposed.
+- `llm-error` on resume (step 6): skipped by default, with a flag for a separate retry run against one model (report 6.4.5).
+- No model fallback inside a run (report 6.4.5): the fallback aliases are never used mid run.
+- Changed names (step 7): a definition from `identifier_delta` is to be proposed and approved by Fatima.
+- Taxonomy document: Aneeza will confirm whether it exists. If not, `label-guidelines` is the stand-in and the "taxonomy rules 1 to 16" comments are removed.

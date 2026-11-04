@@ -160,3 +160,26 @@ def test_missing_provider_never_retries(monkeypatch):
     report.reset_stats()
     result = classify_llm.classify_with_llm("a.ts", "x", "y", None, None)
     assert result["label"] == "unknown" and "no key" in result["reason"]
+
+
+def test_prompt_hashes_change_with_few_shot_examples(tmp_path, monkeypatch):
+    empty = tmp_path / "empty.json"
+    empty.write_text("[]")
+    monkeypatch.setattr(prompt_builder.load_few_shot, "__defaults__", (str(empty),))
+    router, logic = prompt_builder.system_prompt_hash("A"), prompt_builder.system_prompt_hash("B")
+    assert router == prompt_builder.system_prompt_hash("A") and len(router) == 64
+    assert logic == prompt_builder.system_prompt_hash("B") and len(logic) == 64
+    example = [{"file_path": "a.ts", "ours": "x", "theirs": "y",
+                "true_label": "logic/assignment-override", "notes": "both assign x"}]
+    full = tmp_path / "full.json"
+    full.write_text(json.dumps(example))
+    monkeypatch.setattr(prompt_builder.load_few_shot, "__defaults__", (str(full),))
+    assert prompt_builder.system_prompt_hash("A") != router
+    assert prompt_builder.system_prompt_hash("B") != logic
+
+
+def test_logic_prompt_change_leaves_the_router_hash_alone(monkeypatch):
+    router, logic = prompt_builder.system_prompt_hash("A"), prompt_builder.system_prompt_hash("B")
+    monkeypatch.setattr(prompt_builder, "PROMPT_B", "changed")
+    assert prompt_builder.system_prompt_hash("A") == router
+    assert prompt_builder.system_prompt_hash("B") != logic
