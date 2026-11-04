@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ast-git-resolver"
+version = "0.1.0"
+description = "Merge conflict classifier for AI agent pull requests on TypeScript"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "tree-sitter",
+    "tree-sitter-python",
+    "tree-sitter-javascript",
+    "tree-sitter-typescript",
+    "tree-sitter-java",
+    "tree-sitter-go",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+providers = ["google-genai", "anthropic", "openai"]
+dev = ["pytest"]
+
+[project.scripts]
+classify = "classifier.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"classifier.llm" = ["few_shot.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

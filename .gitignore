@@ -1,0 +1,16 @@
+.env
+__pycache__/
+.pytest_cache/
+.venv/
+*.egg-info/
+.refactor_project_marker
+outputs/*
+!outputs/.gitkeep
+
+data/raw/*
+!data/raw/.gitkeep
+data/splits/*
+!data/splits/.gitkeep
+
+.claude
+CLAUDE.md

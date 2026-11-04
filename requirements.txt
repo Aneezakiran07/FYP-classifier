@@ -1,0 +1,14 @@
+# versions are not pinned because the original project had no requirements file
+tree-sitter
+tree-sitter-python
+tree-sitter-javascript
+tree-sitter-typescript
+tree-sitter-java
+tree-sitter-go
+python-dotenv
+pytest
+
+# model provider sdks are optional and only needed for the providers you use
+# google-genai
+# anthropic
+# openai
