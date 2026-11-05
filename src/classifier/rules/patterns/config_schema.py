@@ -51,6 +51,17 @@ def _matches_prefix(name, prefix):
     return name.startswith(prefix + ".")
 
 
+def is_config_name(name):
+    # Tells whether a file name is declarative config, the path is not needed
+    if not name:
+        return False
+    if name in EXACT_NAMES or _matches_tsconfig(name):
+        return True
+    if any(_matches_prefix(name, prefix) for prefix in PREFIX_NAMES):
+        return True
+    return name.lower().endswith(CONFIG_EXTENSIONS)
+
+
 class ConfigSchema(PatternPlugin):
     # Taxonomy rule 7 and the dependency/config-schema label definition.
     # Path based only, no content check. Rules 1 to 4 still run first in
@@ -75,19 +86,7 @@ class ConfigSchema(PatternPlugin):
     precedence_rule = 7
 
     def detect(self, h: ClassifyInput) -> bool:
-        name = _basename(h.file_path)
-        if not name:
-            return False
-
-        if name in EXACT_NAMES:
-            return True
-        if _matches_tsconfig(name):
-            return True
-        if any(_matches_prefix(name, prefix) for prefix in PREFIX_NAMES):
-            return True
-        if name.lower().endswith(CONFIG_EXTENSIONS):
-            return True
-        return False
+        return is_config_name(_basename(h.file_path))
 
     def resolve(self, h: ClassifyInput) -> DeterministicResult:
         return DeterministicResult(

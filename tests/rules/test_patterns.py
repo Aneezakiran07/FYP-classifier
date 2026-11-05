@@ -31,10 +31,10 @@ def make(ours, theirs, path="src/app.ts", base=None, region=None):
 # NoMarkers
 
 def test_no_markers_positive():
-    h = make("", "", region={"no_markers": True})
+    h = make("", "", region={"no_markers": True, "conflict_type": "deleted_by_us"})
     assert NoMarkers().detect(h)
     result = NoMarkers().resolve(h)
-    assert result.label == "mechanical/one-side-change"
+    assert result.label == "logic/business-logic-conflict"
 
 
 def test_no_markers_negative():
@@ -136,8 +136,8 @@ def test_lockfile_negative():
     # No size cap in v3, taxonomy does not mention one
     big = "\n".join(f"line {i}" for i in range(21))
     assert Lockfile().detect(make(big, "x", path="yarn.lock"))
-    # Only the four exact basenames count
-    assert not Lockfile().detect(make("a", "b", path="Cargo.lock"))
+    # Only exact basenames count
+    assert Lockfile().detect(make("a", "b", path="Cargo.lock"))
     assert not Lockfile().detect(make("a", "b", path="my-pnpm-lock.yaml"))
     assert not Lockfile().detect(make("a", "b", path="nested/package-lock.json.bak"))
 

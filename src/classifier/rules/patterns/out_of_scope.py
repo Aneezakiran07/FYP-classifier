@@ -1,6 +1,11 @@
 import os
+import re
 
 from .base import ClassifyInput, DeterministicResult, PatternPlugin
+from .comments_only import PROSE_EXTENSIONS
+from .config_schema import is_config_name
+from .lockfile import LOCKFILE_NAMES
+from .package_manifest import PACKAGE_MANIFEST_NAME
 
 # Taxonomy decision order step 0 and rule 16: binary, generated, minified,
 # snapshot and vendored files are out of scope. They are never classified
@@ -19,6 +24,13 @@ OUT_OF_SCOPE_DIRS = {
     "node_modules",
     "vendor",
 }
+
+
+# The report scopes to TypeScript and these match the conflict file definition in the decisions log
+TYPESCRIPT_EXTENSIONS = (".ts", ".tsx")
+
+# A JavaScript config file stays in scope and is then handled as code
+EXECUTABLE_CONFIG = re.compile(r"\.config\.(?:js|mjs|cjs)$", re.I)
 
 
 def _segments(path):
@@ -52,6 +64,17 @@ def _is_out_of_scope(path):
     return False
 
 
+def _is_allowed_file_type(path):
+    # Stage 0 keeps TypeScript, lockfiles, manifests, config and prose only
+    name = os.path.basename((path or "").replace("\\", "/"))
+    lowered = name.lower()
+    if lowered.endswith(TYPESCRIPT_EXTENSIONS) or lowered.endswith(PROSE_EXTENSIONS):
+        return True
+    if name in LOCKFILE_NAMES or name == PACKAGE_MANIFEST_NAME:
+        return True
+    return is_config_name(name) or bool(EXECUTABLE_CONFIG.search(name))
+
+
 class OutOfScope(PatternPlugin):
     # Taxonomy decision order step 0 and rule 16: a binary, generated,
     # minified, snapshot or vendored file is labeled unknown with the
@@ -64,11 +87,11 @@ class OutOfScope(PatternPlugin):
     precedence_rule = 16
 
     def detect(self, h: ClassifyInput) -> bool:
-        return _is_out_of_scope(h.file_path)
+        return _is_out_of_scope(h.file_path) or not _is_allowed_file_type(h.file_path)
 
     def resolve(self, h: ClassifyInput) -> DeterministicResult:
         return DeterministicResult(
             label="unknown",
-            reason="binary, generated, minified, snapshot or vendored path",
+            reason="binary, generated, minified, snapshot or vendored path, or a file type outside the scope",
             unknown_reason="out-of-scope",
         )

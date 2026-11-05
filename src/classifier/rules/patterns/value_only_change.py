@@ -159,17 +159,15 @@ class ValueOnlyChange(PatternPlugin):
     # name contains an infrastructure word, and it contains no business
     # veto word. Manifest, lockfile and config paths are skipped (rule 7).
     #
-    # Rule 2 still beats this label, but this pattern runs before
-    # OneSideChange (priority 15 against 20). So when base is present and
-    # either side equals base after whitespace collapsing, this pattern
-    # steps aside and rule 2 claims the region.
+    # This pattern belongs to Stage 3 so OneSideChange always runs first
+    # It still steps aside when a side equals the base after whitespace collapsing
     #
     # Without base the label still fires, with base_available=False, as
     # the taxonomy's "When base is unavailable" table requires.
     # resolve() sets policy_resolved=True because the resolution is a
     # configurable policy pick, not a verified merge.
     name = "ValueOnlyChange"
-    priority = 15
+    priority = 83
     requires = "both"
     precedence_rule = 6
 

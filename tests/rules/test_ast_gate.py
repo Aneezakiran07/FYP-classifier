@@ -24,11 +24,11 @@ CASES = [
     ("whitespace_only", "mechanical/whitespace-only", "src/send.ts",
      "send(user, message, retries);",
      "send(\n  user,\n  message,\n  retries\n);"),
-    ("comments_only", "structural/documentation", "src/calc.py",
-     "x = 1  # old note", "x = 1  # new note"),
-    ("identifier_rename_only", "structural/rename", "src/calc.js",
+    ("comments_only", "structural/documentation", "src/calc.ts",
+     "const r = /'/; // it's old", "const r = /'/; // it's new"),
+    ("identifier_rename_only", "structural/rename", "src/calc.ts",
      "const n = items.length; return n * price;", "const count = items.length; return count * price;"),
-    ("formatting_only", "structural/formatting", "src/quote.js",
+    ("formatting_only", "structural/formatting", "src/quote.ts",
      "const a = 'x';", 'const a = "x"'),
 ]
 
@@ -49,12 +49,12 @@ def test_rename_map_is_reported():
 
 
 def test_content_change_is_left_for_the_model(monkeypatch):
-    eq = compute_ast_equivalence("gate.js", "if (age > 18) { allow(); }", "if (age >= 18) { allow(); }")
+    eq = compute_ast_equivalence("gate.ts", "if (age > 18) { allow(); }", "if (age >= 18) { allow(); }")
     assert eq.equivalence == "content_changed"
     assert eq.changed_nodes == ["operator_changed:>\u2192>="]
     # With the model blocked from running, the cap path returns None instead
     result, layer, detail = pipeline.classify_region(
-        "gate.js", "if (age > 18) { allow(); }", "if (age >= 18) { allow(); }", allow_llm=False
+        "gate.ts", "if (age > 18) { allow(); }", "if (age >= 18) { allow(); }", allow_llm=False
     )
     assert result is None and layer is None
 

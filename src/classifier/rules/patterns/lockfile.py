@@ -7,14 +7,24 @@ from .base import ClassifyInput, DeterministicResult, PatternPlugin
 # and the handler is to regenerate the file from the merged manifest
 # rather than text-merge it.
 #
-# Only these four exact filenames count. Other YAML files such as
-# docker-compose.yml or a workflow file are NOT lockfiles and are handled
-# by dependency/config-schema instead.
+# Only these exact filenames count, and any dependency lockfile belongs here
+# Other YAML files such as a workflow file are handled as config instead
 LOCKFILE_NAMES = (
     "package-lock.json",
     "npm-shrinkwrap.json",
     "yarn.lock",
     "pnpm-lock.yaml",
+    ".package-lock.json",
+    "bun.lock",
+    "bun.lockb",
+    "deno.lock",
+    "Cargo.lock",
+    "poetry.lock",
+    "uv.lock",
+    "Pipfile.lock",
+    "Gemfile.lock",
+    "composer.lock",
+    "go.sum",
 )
 
 

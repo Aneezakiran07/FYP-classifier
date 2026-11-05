@@ -133,8 +133,7 @@ class DisjointEdits(PatternPlugin):
     # read as declarations in JS and TSX files, and optional members written
     # name?: count as declarations.
     #
-    # The class is also gated on has_base at the registry, so it never
-    # fires on the current AgenticFlict JSONL, which does not carry base.
+    # The class is also gated on has_base at the registry so it needs a real base
     name = "DisjointEdits"
     priority = 90
     requires = "diff3"

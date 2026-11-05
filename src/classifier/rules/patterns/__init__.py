@@ -14,41 +14,37 @@ from .config_schema import ConfigSchema
 from .import_path_only import ImportPathOnly
 from .disjoint_edits import DisjointEdits
 
-# Order follows the taxonomy decision order. OutOfScope is step 0 and
-# claims binary, generated, minified, snapshot and vendored paths before
-# anything else. NoMarkers and SameChange follow (rules 2 and 1).
-# ValueOnlyChange (rule 6, first branch) sits ahead of OneSideChange but
-# steps aside when a side equals base, so rule 2 still wins. OneSideChange
-# is rule 2 and beats every rule below it when base is present, then the
-# shape checks: whitespace, comments, import restructure (rule 4 and rule 5
-# case 1), reorder. Then the file-type gate (rule 7), which claims
-# lockfiles, manifests and config files after rules 1 to 4. ImportPathOnly
-# (rule 5 case 3) runs ahead of DisjointEdits so a same binding with two
-# paths is not absorbed as a disjoint edit. DisjointEdits is last because
-# rule 8 only fires when nothing earlier matched.
+# Order follows the stages of the report, and the stage order is also the tie break order
+# Stage 0 is OutOfScope
+# Stage 1 is NoMarkers, SameChange and OneSideChange
+# Stage 2 is WhitespaceOnly, CommentsOnly, ImportRestructure and ReorderOnly plus the AST gate
+# Stage 3 is Lockfile, PackageManifest, ConfigSchema, ValueOnlyChange, ImportPathOnly and DisjointEdits
+# ImportPathOnly runs before DisjointEdits so one binding with two paths is not called disjoint
 PATTERNS = [
-    OutOfScope(),         # priority 0   taxonomy step 0 (rule 16)
-    NoMarkers(),          # priority 5   special: region has no text
-    SameChange(),         # priority 10  taxonomy rule 1
-    ValueOnlyChange(),    # priority 15  taxonomy rule 6 first branch
-    OneSideChange(),      # priority 20  taxonomy rule 2 (requires diff3)
-    WhitespaceOnly(),     # priority 30  taxonomy rule 3
-    CommentsOnly(),       # priority 40  taxonomy rule 14
-    ImportRestructure(),  # priority 45  taxonomy rule 4 and rule 5 case 1
-    ReorderOnly(),        # priority 50  taxonomy rule 4
-    Lockfile(),           # priority 60  taxonomy rule 7
-    PackageManifest(),    # priority 70  taxonomy rule 7
-    ConfigSchema(),       # priority 80  taxonomy rule 7
-    ImportPathOnly(),     # priority 85  taxonomy rule 5 case 3
-    DisjointEdits(),      # priority 90  taxonomy rule 8 (requires diff3)
+    OutOfScope(),         # priority 0   stage 0
+    NoMarkers(),          # priority 5   stage 1
+    SameChange(),         # priority 10  stage 1
+    OneSideChange(),      # priority 20  stage 1
+    WhitespaceOnly(),     # priority 30  stage 2
+    CommentsOnly(),       # priority 40  stage 2
+    ImportRestructure(),  # priority 45  stage 2
+    ReorderOnly(),        # priority 50  stage 2
+    Lockfile(),           # priority 60  stage 3
+    PackageManifest(),    # priority 70  stage 3
+    ConfigSchema(),       # priority 80  stage 3
+    ValueOnlyChange(),    # priority 83  stage 3
+    ImportPathOnly(),     # priority 85  stage 3
+    DisjointEdits(),      # priority 90  stage 3
 ]
 
+# The first priority of Stage 3, the AST gate runs just before it
+BOUNDARY_STAGE_PRIORITY = 60
 
-def classify_deterministic_named(h):
-    # Returns the matching pattern name together with its result so the
-    # caller can count matches per pattern, None means nothing matched
+
+def first_match(h, patterns):
+    # Returns the first matching pattern name and its result, or None
     has_base = h.base_text is not None and h.base_text != ""
-    eligible = [p for p in PATTERNS
+    eligible = [p for p in patterns
                 if p.requires == "both"
                 or (p.requires == "diff3" and has_base)
                 or (p.requires == "diff2" and not has_base)]
@@ -63,6 +59,21 @@ def classify_deterministic_named(h):
         if matched:
             return p.name, p.resolve(h)
     return None
+
+
+def classify_before_gate(h):
+    # Runs the patterns of stages 0 to 2 that come before the AST gate
+    return first_match(h, [p for p in PATTERNS if p.priority < BOUNDARY_STAGE_PRIORITY])
+
+
+def classify_boundary_stage(h):
+    # Runs the patterns of Stage 3 that come after the AST gate
+    return first_match(h, [p for p in PATTERNS if p.priority >= BOUNDARY_STAGE_PRIORITY])
+
+
+def classify_deterministic_named(h):
+    # Runs every pattern in order without the AST gate
+    return first_match(h, PATTERNS)
 
 
 def classify_deterministic(h):

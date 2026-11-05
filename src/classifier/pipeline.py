@@ -13,8 +13,8 @@ from pathlib import Path
 from classifier.llm import classify_llm, prompt_builder
 from classifier.llm.classify_llm import classify_with_llm
 from classifier.report import RUN_LOG, STATS, print_report, reset_stats
-from classifier.rules.ast_gate import GATE_LABELS
-from classifier.rules.patterns import ClassifyInput, classify_deterministic_named
+from classifier.rules.ast_gate import GATE_LABELS, apply_guards
+from classifier.rules.patterns import ClassifyInput, classify_before_gate, classify_boundary_stage
 from classifier.schema import (
     Region,
     Result,
@@ -63,6 +63,7 @@ STAGE_BY_PATTERN = {
     "ImportPathOnly": 3,
     "DisjointEdits": 3,
 }
+IDENTITY_STAGE = 1
 AST_GATE_STAGE = 2
 LLM_STAGE = 4
 
@@ -112,7 +113,9 @@ def build_provenance(layer, logic_prompt_ran=False):
 def find_stage(layer, detail):
     if layer == "pattern":
         return STAGE_BY_PATTERN[detail]
-    return AST_GATE_STAGE if layer == "ast" else LLM_STAGE
+    if layer == "ast":
+        return IDENTITY_STAGE if detail == "identical" else AST_GATE_STAGE
+    return LLM_STAGE
 
 
 def old_fields(values, timestamp):
@@ -196,30 +199,37 @@ def compact_output(output_path):
     os.replace(temporary_path, output_path)
 
 
+def pattern_result(matched, has_base):
+    pattern_name, det = matched
+    return {
+        "label": det.label, "confidence": det.confidence,
+        "reason": det.reason, "logic_subtype": det.logic_subtype,
+        "base_available": has_base,
+        "graph_unavailable": det.graph_unavailable,
+        "policy_resolved": det.policy_resolved,
+        "unknown_reason": det.unknown_reason,
+        "candidate_labels": det.candidate_labels,
+        "gate": None,
+    }, "pattern", pattern_name
+
+
 def classify_region(file_path, ours_text, theirs_text, base_text=None, region=None, allow_llm=True):
-    # Three layers in order of cost. Text patterns first, then the ast gate,
-    # then the model. Returns the result fields plus the layer that decided
-    # and a detail such as the pattern name. A None result means the region
-    # needed the model but the per file cap did not allow it.
+    # Runs the stages in order, patterns of stages 0 to 2, then the ast gate
+    # with its guards, then the patterns of Stage 3, then the model
+    # Returns the result fields plus the layer that decided and a detail
+    # such as the pattern name
+    # A None result means the region needed the model but the per file cap did not allow it
     has_base = bool(base_text)
     h = ClassifyInput(file_path, ours_text, theirs_text, base_text=base_text, region=region)
-    matched = classify_deterministic_named(h)
+    matched = classify_before_gate(h)
     if matched is not None:
-        pattern_name, det = matched
-        return {
-            "label": det.label, "confidence": det.confidence,
-            "reason": det.reason, "logic_subtype": det.logic_subtype,
-            "base_available": has_base,
-            "graph_unavailable": det.graph_unavailable,
-            "policy_resolved": det.policy_resolved,
-            "unknown_reason": det.unknown_reason,
-            "candidate_labels": det.candidate_labels,
-            "gate": None,
-        }, "pattern", pattern_name
+        return pattern_result(matched, has_base)
 
     eq = None
     if AST_DIFF_AVAILABLE:
-        eq = compute_ast_equivalence(file_path, ours_text, theirs_text)
+        eq = apply_guards(
+            compute_ast_equivalence(file_path, ours_text, theirs_text), ours_text, theirs_text
+        )
         if eq.equivalence in GATE_LABELS:
             label, reason = GATE_LABELS[eq.equivalence]
             evidence = f"ast equivalence {eq.equivalence}"
@@ -233,6 +243,10 @@ def classify_region(file_path, ours_text, theirs_text, base_text=None, region=No
                 "policy_resolved": False,
                 "gate": eq.equivalence,
             }, "ast", eq.equivalence
+
+    matched = classify_boundary_stage(h)
+    if matched is not None:
+        return pattern_result(matched, has_base)
 
     if not allow_llm:
         return None, None, None

@@ -107,3 +107,26 @@ Answered by Aneeza. Everything that touches `rules/` or a shared file still need
 - No model fallback inside a run (report 6.4.5): the fallback aliases are never used mid run.
 - Changed names (step 7): a definition from `identifier_delta` is to be proposed and approved by Fatima.
 - Taxonomy document: Aneeza will confirm whether it exists. If not, `label-guidelines` is the stand-in and the "taxonomy rules 1 to 16" comments are removed.
+
+## D4. Rule fixes made before Fatima starts (2026-11-05)
+
+Aneeza asked for the known rule bugs to be fixed in place so `main` does not carry them. Fatima owns `rules/` from here and should review these.
+
+### Fixed to match the report
+- Stage order: `ValueOnlyChange` moved to Stage 3, and the AST gate now runs between Stage 2 and Stage 3.
+- Guards: a verdict that fails a guard is now treated as content changed and is never labeled. The keyword and directive guards apply to every verdict except identical. The report names the keyword guard for whitespace and the directive guard for comments, and applying them more widely is our choice because a failure only sends the region onward.
+- A file with no parser now gets `not_analyzed` from the gate, so a YAML indentation change is not called whitespace-only.
+- Stage 0 now keeps only TypeScript (`.ts`, `.tsx`, as in definition E), lockfiles, manifests, config and prose.
+- Lockfiles now include any dependency lockfile, such as `bun.lock`, `bun.lockb` and `Cargo.lock`.
+- Whole file deletions are `business-logic-conflict`, decided at Stage 1 by a rule. This does not fit the Stage 1 label list in `CLAUDE.md`, so it is recorded here.
+
+### Proposed, waiting for confirmation
+- No-marker regions that are not deletions are `unknown` with reason `no-markers`. Fatima to confirm.
+- JavaScript files named like `next.config.mjs` stay in scope and are handled as code, not as `config-schema`.
+
+### Added on Aneeza's approval, the report does not define these
+- Prose list: `.md`, `.mdx`, `.rst`, `.txt`.
+- Rename guard: the report says "renamed local identifiers" but defines no check. A rename verdict now counts only when every old name is declared in the region, as a variable, function, class, type, interface, enum or function parameter. Otherwise the verdict is treated as content changed, so swapping `isAdmin(user)` for `isOwner(user)` is no longer labeled `rename`. Forms the check does not read, such as destructuring and method parameters, go onward to later stages, which is the safe direction. Fatima to review.
+
+### Known and not fixed
+- `DisjointEdits` cannot check for a joint use outside the region because the data has no context lines.

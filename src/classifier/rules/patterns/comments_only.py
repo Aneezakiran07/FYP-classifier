@@ -13,7 +13,7 @@ C_STYLE_EXTENSIONS = (
 
 # Taxonomy rule 14 second sentence: prose-only files are documentation
 # by definition, so any content difference in them is documentation.
-PROSE_EXTENSIONS = (".md", ".txt", ".rst")
+PROSE_EXTENSIONS = (".md", ".mdx", ".txt", ".rst")
 
 # Taxonomy rule 14 last sentence: directive comments count as code, so a
 # difference that lives only in one of these is not documentation. The
