@@ -287,12 +287,16 @@ def test_reorder_only_negative():
 
 # Registry
 
-def test_registry_has_eleven_patterns_in_priority_order():
-    assert len(PATTERNS) == 11
+def test_registry_holds_every_pattern_in_stage_order():
+    assert [p.name for p in PATTERNS] == [
+        "OutOfScope",
+        "NoMarkers", "SameChange", "OneSideChange",
+        "WhitespaceOnly", "CommentsOnly", "ImportRestructure", "ReorderOnly",
+        "Lockfile", "PackageManifest", "ConfigSchema", "ValueOnlyChange", "ImportPathOnly", "DisjointEdits",
+    ]
     priorities = [p.priority for p in PATTERNS]
     assert priorities == sorted(priorities)
-    assert len(set(priorities)) == 11
-    assert len({p.name for p in PATTERNS}) == 11
+    assert len(set(priorities)) == len(PATTERNS)
 
 
 def test_registry_overlap_is_settled_by_priority():

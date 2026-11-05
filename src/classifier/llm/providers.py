@@ -1,4 +1,5 @@
 import os
+from collections import Counter
 
 # Friendly names that map to the exact model string the provider api expects
 MODEL_ALIASES = {
@@ -19,10 +20,34 @@ HACKCLUB_PREFIX = "hackclub/"
 # One clients cache per provider so a multi model run does not rebuild them
 _CLIENTS = {}
 
+# Tokens the provider reported for this run, so a run can state its real size
+USAGE = Counter()
+
 
 class ProviderUnavailable(Exception):
     # Raised when a sdk or key is missing, retrying can never fix this
     pass
+
+
+class TruncatedOutput(Exception):
+    # Raised when the model ran out of length, the partial reply is thrown away
+    pass
+
+
+def count_usage(usage, input_name, output_name):
+    # A provider may leave usage out, which must not fail a call that worked
+    USAGE["input"] += getattr(usage, input_name, 0) or 0
+    USAGE["output"] += getattr(usage, output_name, 0) or 0
+
+
+def gemini_was_truncated(response):
+    candidates = response.candidates or []
+    return bool(candidates) and getattr(candidates[0].finish_reason, "name", "") == "MAX_TOKENS"
+
+
+def resolve_model(model):
+    # Turns a friendly alias into the exact model name, an alias can change later
+    return MODEL_ALIASES.get(model, model)
 
 
 def provider_for(model):
@@ -121,15 +146,25 @@ def call_model(model, system_instruction, user_message):
         from google.genai import types
         response = client.models.generate_content(
             model=api_model, contents=user_message,
-            config=types.GenerateContentConfig(system_instruction=system_instruction))
+            config=types.GenerateContentConfig(system_instruction=system_instruction, temperature=0))
+        count_usage(getattr(response, "usage_metadata", None), "prompt_token_count", "candidates_token_count")
+        if gemini_was_truncated(response):
+            raise TruncatedOutput(f"{model} ran out of length")
         return response.text
     if provider == "anthropic":
         response = client.messages.create(
-            model=api_model, max_tokens=1024, system=system_instruction,
+            model=api_model, max_tokens=1024, temperature=0, system=system_instruction,
             messages=[{"role": "user", "content": user_message}])
+        count_usage(getattr(response, "usage", None), "input_tokens", "output_tokens")
+        if response.stop_reason == "max_tokens":
+            raise TruncatedOutput(f"{model} ran out of length")
         return "".join(b.text for b in response.content if getattr(b, "type", "") == "text")
     response = client.chat.completions.create(
         model=api_model,
+        temperature=0,
         messages=[{"role": "system", "content": system_instruction},
                   {"role": "user", "content": user_message}])
+    count_usage(getattr(response, "usage", None), "prompt_tokens", "completion_tokens")
+    if response.choices[0].finish_reason == "length":
+        raise TruncatedOutput(f"{model} ran out of length")
     return response.choices[0].message.content

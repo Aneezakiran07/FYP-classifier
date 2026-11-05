@@ -17,7 +17,8 @@ def reset_stats():
     STATS.update({
         "total": 0, "deterministic": 0, "by_pattern": {}, "ast": 0, "by_equivalence": {},
         "llm": 0, "prompt_a": 0, "prompt_b": 0, "a_structural": 0, "a_unknown": 0,
-        "needs_verification": 0, "capped": 0,
+        "needs_verification": 0, "capped": 0, "llm_error": 0, "model_calls": 0,
+        "consecutive_llm_errors": 0,
     })
     RUN_LOG.clear()
 
@@ -42,8 +43,11 @@ def print_report():
     extra = f", {s['a_unknown']} were unknown" if s["a_unknown"] else ""
     print(f"  prompt A: {s['prompt_a']}, prompt B: {s['prompt_b']} ({s['a_structural']} were structural{extra})")
     print(f"needs_verification:   {s['needs_verification']} ({pct(s['needs_verification'])})")
+    print(f"calls to the model:   {s['model_calls']}")
     if s["capped"]:
         print(f"capped:               {s['capped']} ({pct(s['capped'])})")
+    if s["llm_error"]:
+        print(f"llm-error:            {s['llm_error']} ({pct(s['llm_error'])})")
 
 def load_ground_truth(labels_path):
     # Hand labels keyed the same way as the output records
@@ -68,9 +72,11 @@ def matches_truth(entry, true_label):
 def summarize_model(model, truth):
     # One row of the comparison table for the model that just finished
     total = STATS["total"]
-    llm_entries = [e for e in RUN_LOG if e["layer"] == "llm" and e["key"] in truth]
+    # Capped and llm-error regions have no label and are never scored as wrong
+    labeled = [e for e in RUN_LOG if e["key"] in truth and e["label"] is not None]
+    llm_entries = [e for e in labeled if e["layer"] == "llm"]
     agreed = sum(matches_truth(e, truth[e["key"]]) for e in llm_entries)
-    all_entries = [e for e in RUN_LOG if e["key"] in truth]
+    all_entries = labeled
     overall = sum(matches_truth(e, truth[e["key"]]) for e in all_entries)
     row = {
         "model": model,

@@ -5,13 +5,13 @@
 import json
 import os
 import re
+from collections import Counter
 from datetime import datetime, timezone
 from functools import lru_cache
 from importlib import metadata
 from pathlib import Path
 
-from classifier.llm import classify_llm, prompt_builder
-from classifier.llm.classify_llm import classify_with_llm
+from classifier.llm import classify_llm, prompt_builder, prompts, providers, route, run_logic_tests
 from classifier.report import RUN_LOG, STATS, print_report, reset_stats
 from classifier.rules.ast_gate import GATE_LABELS, apply_guards
 from classifier.rules.patterns import ClassifyInput, classify_before_gate, classify_boundary_stage
@@ -22,6 +22,7 @@ from classifier.schema import (
     SOURCE_RULE,
     STATUS_CAPPED,
     STATUS_CLASSIFIED,
+    STATUS_LLM_ERROR,
     bare_label,
     strip_family,
 )
@@ -37,10 +38,10 @@ except ImportError:
 # case like a giant lockfile diff does not silently burn a lot of time
 LARGE_PR_KEY_REGION_WARNING_THRESHOLD = 15
 
-# Once a single file within one pr_key has sent this many regions to the
-# model, any further regions in that file are capped instead, only model
-# calls count toward this, patterns and the ast gate are free
-PER_FILE_API_CALL_CAP = 15
+# Once a single file within one pr_key has used this many model calls, any
+# further regions in that file that need the model are capped
+# A region that starts below the ceiling finishes, so a file can pass it slightly
+PER_FILE_API_CALL_CAP = 50
 
 # The reason used for a region that got capped instead of sent to the
 # model, kept as a constant so the counting script can match exactly
@@ -67,6 +68,17 @@ IDENTITY_STAGE = 1
 AST_GATE_STAGE = 2
 LLM_STAGE = 4
 
+# The reason recorded while the checks of step 5 do not exist
+VALIDATOR_NOT_BUILT = "validator-not-built"
+
+# This many failures in a row means the model or the budget is gone, so the run stops
+# and the regions it has not reached stay unwritten for a later resume
+MAX_CONSECUTIVE_LLM_ERRORS = 10
+
+# The logic label that stays unknown while the data has no surrounding lines
+NEEDS_CONTEXT_TEST = "confluent-interference"
+NO_CONTEXT_REASON = "no-context-lines"
+
 # The default value of each older field kept inside the classifier block
 OLD_FIELD_DEFAULTS = {
     "secondary": None,
@@ -84,6 +96,7 @@ OLD_FIELD_DEFAULTS = {
     "unknown_reason": None,
     "candidate_labels": None,
     "gate": None,
+    "model_calls": 0,
 }
 
 
@@ -102,11 +115,13 @@ def build_provenance(layer, logic_prompt_ran=False):
     # A region decided by a rule carries no model name and no prompt hashes
     provenance = {"component_version": component_version()}
     if layer == "llm":
-        provenance["model_name"] = classify_llm.MODEL_NAME
+        provenance["model_name"] = providers.resolve_model(classify_llm.MODEL_NAME)
         provenance["router_prompt_hash"] = prompt_builder.system_prompt_hash("A")
+        provenance["router_prompt_version"] = prompts.ROUTER_PROMPT_VERSION
         provenance["logic_prompt_hash"] = (
             prompt_builder.system_prompt_hash("B") if logic_prompt_ran else None
         )
+        provenance["logic_prompt_version"] = prompts.LOGIC_PROMPT_VERSION if logic_prompt_ran else None
     return provenance
 
 
@@ -136,6 +151,8 @@ def build_classified_block(region, result, layer, detail, timestamp):
         reason=result["reason"],
         base_state=region.base_state,
         input_hash=region.input_hash,
+        trace=result.get("trace", []),
+        confirming_test=result.get("confirming_test") or detail,
         provenance=build_provenance(layer, result.get("logic_prompt_ran", False)),
         extra=old_fields(result, timestamp),
     ).to_block()
@@ -151,6 +168,21 @@ def build_capped_block(region, timestamp):
         base_state=region.base_state,
         input_hash=region.input_hash,
         provenance={"component_version": component_version(), "model_name": None},
+        extra=old_fields(values, timestamp),
+    ).to_block()
+
+
+def build_error_block(region, result, timestamp):
+    # A failed model call decided nothing, so it has no label and no source
+    values = {"base_available": bool(region.base_text), "model_calls": result.get("model_calls", 0)}
+    return Result(
+        status=STATUS_LLM_ERROR,
+        stage=LLM_STAGE,
+        reason=result["reason"],
+        base_state=region.base_state,
+        input_hash=region.input_hash,
+        trace=result["trace"],
+        provenance=build_provenance("llm", result["logic_prompt_ran"]),
         extra=old_fields(values, timestamp),
     ).to_block()
 
@@ -213,6 +245,84 @@ def pattern_result(matched, has_base):
     }, "pattern", pattern_name
 
 
+def unknown_from_model(reason, unknown_reason):
+    # The pipeline says it does not know and hands the region to verification
+    return {
+        "label": "unknown", "reason": reason,
+        "needs_verification": True, "verification_priority": "high",
+        "unknown_reason": unknown_reason,
+    }
+
+
+def trace_entry(test, result, reason, **details):
+    return {"stage": LLM_STAGE, "test": test, "result": result, "reason": reason, **details}
+
+
+def logic_test_entries(answers, selected):
+    # Tests before the selected one failed and tests after it were never used
+    # The answer of the model is kept on every entry so nothing it said is lost
+    entries = []
+    selected_position = answers.index(selected) if selected is not None else len(answers)
+    for position, answer in enumerate(answers):
+        if position == selected_position:
+            result, reason = "passed", "first test the model marked as met"
+        elif position > selected_position:
+            result, reason = "skipped", "an earlier test was selected"
+        else:
+            result, reason = "failed", "the model marked this test as not met"
+        entries.append(trace_entry(answer.test_id, result, reason, met=answer.met, evidence=answer.evidence))
+    return entries
+
+
+def select_logic_label(routed, answers, trace):
+    # The pipeline picks the first met test and the model never names the label
+    # The label stays flagged until the validators of step 5 can confirm it
+    selected = next((answer for answer in answers if answer.met), None)
+    trace.extend(logic_test_entries(answers, selected))
+    if selected is None:
+        return unknown_from_model("the model marked no logic test as met", "no-test-met")
+    if selected.test_id == NEEDS_CONTEXT_TEST:
+        # The joint use cannot be checked without lines around the region
+        trace.append(trace_entry("context-lines", "failed", NO_CONTEXT_REASON))
+        return unknown_from_model("the joint use cannot be checked without context lines", NO_CONTEXT_REASON)
+    trace.append(trace_entry("validator", "skipped", VALIDATOR_NOT_BUILT))
+    return {
+        "label": selected.test_id, "reason": routed["reason"], "evidence": selected.evidence,
+        "confirming_test": selected.test_id,
+        "needs_verification": True, "verification_priority": "normal",
+    }
+
+
+def run_stage_4(stage_region, eq, trace):
+    routed = route(stage_region, eq)
+    trace.append(trace_entry("router", "passed", routed["reason"], answer=routed["kind"]))
+    if routed["kind"] == "structural":
+        # A hint becomes a label only after a check confirms it, and step 5 builds that check
+        trace.append(trace_entry("confirm-structural", "skipped", VALIDATOR_NOT_BUILT))
+        return unknown_from_model("the model hinted structural and no check confirmed it", "ambiguous")
+    if routed["kind"] == "unknown":
+        return unknown_from_model(routed["reason"], "router-unknown")
+    return select_logic_label(routed, run_logic_tests(stage_region, eq), trace)
+
+
+def classify_with_llm(file_path, ours_text, theirs_text, eq, region):
+    # A failed call is recorded as llm-error with no label and never as unknown
+    calls_before = STATS["model_calls"]
+    stage_region = Region.from_raw(None, 0, {
+        **region, "file_path": file_path, "ours_text": ours_text, "theirs_text": theirs_text,
+    })
+    trace = []
+    try:
+        result = run_stage_4(stage_region, eq, trace)
+    except classify_llm.ModelCallFailed as e:
+        trace.append(trace_entry("model-call", "failed", str(e)))
+        result = {"status": STATUS_LLM_ERROR, "reason": e.code}
+    result["trace"] = trace
+    result["model_calls"] = STATS["model_calls"] - calls_before
+    result["logic_prompt_ran"] = any(entry.get("answer") == "semantic" for entry in trace)
+    return result
+
+
 def classify_region(file_path, ours_text, theirs_text, base_text=None, region=None, allow_llm=True):
     # Runs the stages in order, patterns of stages 0 to 2, then the ast gate
     # with its guards, then the patterns of Stage 3, then the model
@@ -251,7 +361,9 @@ def classify_region(file_path, ours_text, theirs_text, base_text=None, region=No
     if not allow_llm:
         return None, None, None
 
-    llm_result = classify_with_llm(file_path, ours_text, theirs_text, eq, region)
+    llm_result = classify_with_llm(
+        file_path, ours_text, theirs_text, eq, {**(region or {}), "base_text": base_text}
+    )
     llm_result["base_available"] = has_base
     llm_result["graph_unavailable"] = True
     llm_result["policy_resolved"] = False
@@ -276,7 +388,7 @@ def count_decision(block, layer, detail):
     return shown
 
 
-def process_region(pr_key, region_position, raw_region, outfile, api_call_counts_by_file,
+def process_region(pr_key, region_position, raw_region, outfile, calls_used_by_file,
                    finished_keys):
     region = Region.from_raw(pr_key, region_position, raw_region)
     if region.key in finished_keys:
@@ -286,8 +398,8 @@ def process_region(pr_key, region_position, raw_region, outfile, api_call_counts
 
     # Only model calls count toward the cap, so patterns and the ast gate
     # still run on a file that has already used up its share
-    calls_so_far_for_file = api_call_counts_by_file.get(region.file_path, 0)
-    allow_llm = calls_so_far_for_file < PER_FILE_API_CALL_CAP
+    file_key = (pr_key, region.file_path)
+    allow_llm = calls_used_by_file[file_key] < PER_FILE_API_CALL_CAP
 
     result, layer, detail = classify_region(
         region.file_path, region.ours_text, region.theirs_text, region.base_text,
@@ -299,11 +411,17 @@ def process_region(pr_key, region_position, raw_region, outfile, api_call_counts
         STATS["capped"] += 1
         block = build_capped_block(region, timestamp)
         shown = f"{STATUS_CAPPED} (per file cap)"
+    elif result.get("status") == STATUS_LLM_ERROR:
+        STATS["llm_error"] += 1
+        STATS["consecutive_llm_errors"] += 1
+        block = build_error_block(region, result, timestamp)
+        shown = f"{STATUS_LLM_ERROR} ({block['reason']})"
     else:
         block = build_classified_block(region, result, layer, detail, timestamp)
         shown = count_decision(block, layer, detail)
         if layer == "llm":
-            api_call_counts_by_file[region.file_path] = calls_so_far_for_file + 1
+            STATS["consecutive_llm_errors"] = 0
+    calls_used_by_file[file_key] += block["model_calls"]
 
     RUN_LOG.append({
         "key": (pr_key, region.file_path, region.conflict_index), "layer": layer,
@@ -316,33 +434,67 @@ def process_region(pr_key, region_position, raw_region, outfile, api_call_counts
     finished_keys.add(region.key)
 
 
-def run_one(input_path, output_path, rerun=False):
+def is_llm_error(record):
+    return record["classifier"]["status"] == STATUS_LLM_ERROR
+
+
+def count_calls_by_file(records):
+    # Rebuilds the call count of each file so the ceiling survives a resume
+    counts = Counter()
+    for (pr_key, file_path, _), record in records.items():
+        counts[(pr_key, file_path)] += record["classifier"].get("model_calls", 0)
+    return counts
+
+
+def reason_to_stop(max_calls):
+    if max_calls and STATS["model_calls"] >= max_calls:
+        return f"reached the limit of {max_calls} model calls"
+    if STATS["consecutive_llm_errors"] >= MAX_CONSECUTIVE_LLM_ERRORS:
+        return f"{MAX_CONSECUTIVE_LLM_ERRORS} model failures in a row"
+    return None
+
+
+def process_input(infile, outfile, calls_used_by_file, finished_keys, max_calls):
+    # Returns why the run stopped early, or None when every region was reached
+    for line in infile:
+        line = line.strip()
+        if not line:
+            continue
+        record = json.loads(line)
+        pr_key = record.get("pr_key")
+        regions = record.get("regions", [])
+        if len(regions) > LARGE_PR_KEY_REGION_WARNING_THRESHOLD:
+            print(f"Warning, {pr_key} has {len(regions)} regions, this may take a while")
+
+        for region_position, region in enumerate(regions):
+            stop = reason_to_stop(max_calls)
+            if stop:
+                return stop
+            process_region(pr_key, region_position, region, outfile,
+                           calls_used_by_file, finished_keys)
+    return None
+
+
+def run_one(input_path, output_path, rerun=False, retry_errors=False, max_calls=None):
     # A normal run skips finished keys so it can resume after stopping
+    # An llm-error counts as finished unless this is a retry run for those errors
     # A rerun processes every key in the input and overwrites only those keys
     reset_stats()
     compact_output(output_path)
-    finished_keys = set() if rerun else set(read_records(output_path))
+    records = {} if rerun else read_records(output_path)
+    if retry_errors:
+        records = {key: record for key, record in records.items() if not is_llm_error(record)}
+    finished_keys = set(records)
+    calls_used_by_file = count_calls_by_file(records)
     if rerun:
         print("Rerun is on, every region in the input is classified again and overwritten")
     else:
-        print(f"Found {len(finished_keys)} regions already labeled, they will be skipped")
+        print(f"Found {len(finished_keys)} regions already finished, they will be skipped")
 
     with open(input_path, "r", encoding="utf-8") as infile, \
             open(output_path, "a", encoding="utf-8") as outfile:
-        for line in infile:
-            line = line.strip()
-            if not line:
-                continue
-            record = json.loads(line)
-            pr_key = record.get("pr_key")
-            regions = record.get("regions", [])
-            if len(regions) > LARGE_PR_KEY_REGION_WARNING_THRESHOLD:
-                print(f"Warning, {pr_key} has {len(regions)} regions, this may take a while")
-
-            # The per file cap starts fresh for every pr_key
-            api_call_counts_by_file = {}
-            for region_position, region in enumerate(regions):
-                process_region(pr_key, region_position, region, outfile,
-                               api_call_counts_by_file, finished_keys)
+        stop = process_input(infile, outfile, calls_used_by_file, finished_keys, max_calls)
     compact_output(output_path)
+    if stop:
+        print(f"Stopped early, {stop}. Run the same command again to resume")
     print_report()

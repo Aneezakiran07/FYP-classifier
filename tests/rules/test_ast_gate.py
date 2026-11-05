@@ -19,11 +19,11 @@ def no_model(monkeypatch):
 
 
 CASES = [
-    ("whitespace_only", "mechanical/whitespace-only", "src/math.ts",
-     "const total = a+b;", "const total  =  a + b;"),
-    ("whitespace_only", "mechanical/whitespace-only", "src/send.ts",
-     "send(user, message, retries);",
-     "send(\n  user,\n  message,\n  retries\n);"),
+    # A fragment that does not parse and holds a regex or markup passes the pattern and reaches the gate
+    ("whitespace_only", "mechanical/whitespace-only", "src/fragment.ts",
+     "if (x) {\n const r = /a/;", "if (x) {\n  const r = /a/;"),
+    ("whitespace_only", "mechanical/whitespace-only", "src/fragment.tsx",
+     "<a>\n<b c='d'/>", "<a>\n  <b c='d'/>"),
     ("comments_only", "structural/documentation", "src/calc.ts",
      "const r = /'/; // it's old", "const r = /'/; // it's new"),
     ("identifier_rename_only", "structural/rename", "src/calc.ts",
@@ -41,6 +41,18 @@ def test_gate_decides_without_the_model(equivalence, label, path, ours, theirs):
     assert detail == equivalence
     assert result["label"] == label
     assert result["confidence"] == "high"
+
+
+@pytest.mark.parametrize("path,ours,theirs", [
+    ("src/math.ts", "const total = a+b;", "const total  =  a + b;"),
+    ("src/send.ts", "send(user, message, retries);", "send(\n  user,\n  message,\n  retries\n);"),
+])
+def test_the_whitespace_pattern_decides_what_it_can_parse_before_the_gate(path, ours, theirs):
+    # Both belong to Stage 2 and the gate agrees, so the label is the same either way
+    assert compute_ast_equivalence(path, ours, theirs).equivalence == "whitespace_only"
+    result, layer, detail = pipeline.classify_region(path, ours, theirs)
+    assert (layer, detail) == ("pattern", "WhitespaceOnly")
+    assert result["label"] == "mechanical/whitespace-only"
 
 
 def test_rename_map_is_reported():

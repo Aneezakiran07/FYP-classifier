@@ -1,7 +1,9 @@
 import json
 
+import pytest
+
 from classifier import cli, pipeline
-from classifier.llm import providers
+from classifier.llm import prompts, providers
 
 
 def write_inputs(tmp_path):
@@ -22,11 +24,14 @@ def write_inputs(tmp_path):
     (tmp_path / "sample_labels.jsonl").write_text("\n".join(json.dumps(x) for x in labels) + "\n")
 
 
+def logic_reply(met=()):
+    return json.dumps({"tests": [{"test_id": test_id, "met": test_id in met, "evidence": "quoted"}
+                                 for test_id in prompts.LOGIC_TESTS]})
+
+
 def install_fakes(monkeypatch):
-    # Model good is right on both model-classified regions, model bad
-    # always answers other at low confidence. With the v3 escape hatch,
-    # other and low confidence both become unknown, so bad cannot match
-    # either ground truth label.
+    # Model good is right on both model classified regions
+    # Model bad marks no test as met, so it cannot match either true label
     monkeypatch.setattr(providers, "check_available",
                         lambda m: (False, "no api key found for deepseek") if m == "deepseek-r1" else (True, ""))
 
@@ -34,10 +39,9 @@ def install_fakes(monkeypatch):
         if '"kind"' in system:
             return json.dumps({"kind": "semantic", "reason": "value differs"})
         if model == "good":
-            subtype = ("logic/assignment-override" if "src/one.ts" in user
-                       else "logic/business-logic-conflict")
-            return json.dumps({"subtype": subtype, "confidence": "high", "evidence": "x"})
-        return json.dumps({"subtype": "other", "confidence": "low", "evidence": "x"})
+            test_id = "assignment-override" if "src/one.ts" in user else "business-logic-conflict"
+            return logic_reply(met=[test_id])
+        return logic_reply()
     monkeypatch.setattr(providers, "call_model", call)
 
 
@@ -58,8 +62,7 @@ def test_models_flag_writes_one_file_per_model_and_a_table(tmp_path, monkeypatch
         assert column in header
     good = [l for l in text.splitlines() if l.startswith("good")][0].split()
     bad = [l for l in text.splitlines() if l.startswith("bad")][0].split()
-    # good matches both labeled model regions, bad matches neither because
-    # its answer becomes unknown under the v3 escape hatch
+    # good matches both labeled model regions and bad matches neither
     assert good[1:5] == ["1/3", "2/3", "2/2", "100%"]
     assert bad[3:5] == ["0/2", "0%"]
 
@@ -69,7 +72,7 @@ REPORT_FIELDS = ["status", "reason", "stage", "source", "base_state", "input_has
 OLD_FIELDS = ["secondary", "logic_subtype", "confidence", "evidence", "missing_context", "steps",
               "capped", "needs_verification", "verification_priority", "base_available",
               "graph_unavailable", "policy_resolved", "unknown_reason", "candidate_labels",
-              "gate", "timestamp"]
+              "gate", "model_calls", "timestamp"]
 
 
 def read_rows(path):
@@ -85,8 +88,7 @@ def test_output_record_holds_the_join_key_and_the_classifier_block(tmp_path, mon
         assert list(row) == ["pr_key", "file_path", "conflict_index", "effective_index", "classifier"]
         assert list(row["classifier"]) == ["label"] + REPORT_FIELDS + OLD_FIELDS
         assert row["classifier"]["status"] == "classified"
-    # Both model-classified regions from "bad" now route to verification
-    # because other at low confidence becomes unknown under the v3 rule.
+    # Both model classified regions from bad become unknown with no test met
     flagged = [r["classifier"] for r in rows if r["classifier"]["needs_verification"]]
     assert len(flagged) == 2 and all(b["verification_priority"] == "high" for b in flagged)
 
@@ -107,6 +109,8 @@ def test_rule_block_has_no_model_name_and_model_block_does(tmp_path, monkeypatch
     assert model["provenance"]["model_name"] == "good"
     assert len(model["provenance"]["router_prompt_hash"]) == 64
     assert len(model["provenance"]["logic_prompt_hash"]) == 64
+    assert model["provenance"]["router_prompt_version"] == prompts.ROUTER_PROMPT_VERSION
+    assert model["provenance"]["logic_prompt_version"] == prompts.LOGIC_PROMPT_VERSION
     assert model["provenance"]["component_version"] == "0.1.0"
     assert (model["base_state"], len(model["input_hash"])) == ("missing", 64)
 
@@ -139,6 +143,7 @@ def test_router_only_region_has_no_logic_prompt_hash(tmp_path, monkeypatch):
     assert block["source"] == "model"
     assert len(block["provenance"]["router_prompt_hash"]) == 64
     assert block["provenance"]["logic_prompt_hash"] is None
+    assert block["provenance"]["logic_prompt_version"] is None
 
 
 def test_rerun_overwrites_only_the_keys_in_its_input(tmp_path, monkeypatch):
@@ -192,3 +197,306 @@ def test_resume_skips_finished_regions(tmp_path, monkeypatch, capsys):
     cli.main(args)
     cli.main(args)
     assert len((tmp_path / "out.jsonl").read_text().splitlines()) == 3
+
+def one_region_block(tmp_path, monkeypatch, call, region=None):
+    # Runs one TypeScript region through the pipeline with a fake model
+    install_fakes(monkeypatch)
+    monkeypatch.setattr(providers, "call_model", call)
+    raw_region = {"conflict_index": 0, "ours_text": "x = 1", "theirs_text": "x = 2", "file_path": "src/one.ts"}
+    raw_region.update(region or {})
+    (tmp_path / "in.jsonl").write_text(json.dumps({"pr_key": "o/r#1", "regions": [raw_region]}) + "\n")
+    out = tmp_path / "out.jsonl"
+    cli.main([str(tmp_path / "in.jsonl"), str(out), "--model", "good", "--delay", "0"])
+    return read_rows(out)[0]["classifier"]
+
+
+def semantic_then(reply):
+    def call(model, system, user):
+        return json.dumps({"kind": "semantic", "reason": "value differs"}) if '"kind"' in system else reply
+    return call
+
+
+def trace_results(block):
+    return {entry["test"]: entry["result"] for entry in block["trace"]}
+
+
+def test_the_pipeline_selects_the_first_met_test(tmp_path, monkeypatch):
+    reply = logic_reply(met=["execution-perturbation", "assignment-override", "business-logic-conflict"])
+    block = one_region_block(tmp_path, monkeypatch, semantic_then(reply))
+    assert block["label"] == "execution-perturbation"
+    assert (block["stage"], block["source"], block["status"]) == (4, "model", "classified")
+    assert block["evidence"] == "quoted" and block["reason"] == "value differs"
+
+
+def test_the_trace_shows_every_test_and_the_skipped_validator(tmp_path, monkeypatch):
+    reply = logic_reply(met=["execution-perturbation", "assignment-override"])
+    block = one_region_block(tmp_path, monkeypatch, semantic_then(reply))
+    assert trace_results(block) == {
+        "router": "passed",
+        "null-safety-conflict": "failed",
+        "type-incompatibility": "failed",
+        "execution-perturbation": "passed",
+        "overlap-contamination": "skipped",
+        "assignment-override": "skipped",
+        "confluent-interference": "skipped",
+        "business-logic-conflict": "skipped",
+        "validator": "skipped",
+    }
+    # A later test the model marked as met keeps its answer in the trace
+    later = [entry for entry in block["trace"] if entry["test"] == "assignment-override"][0]
+    assert later["met"] is True and later["evidence"] == "quoted"
+    assert all(entry["reason"] for entry in block["trace"])
+
+
+def test_a_label_stays_flagged_while_the_validator_is_not_built(tmp_path, monkeypatch):
+    block = one_region_block(tmp_path, monkeypatch, semantic_then(logic_reply(met=["assignment-override"])))
+    assert block["needs_verification"] is True
+    assert block["trace"][-1]["reason"] == pipeline.VALIDATOR_NOT_BUILT
+
+
+def test_no_test_met_is_unknown_with_a_reason(tmp_path, monkeypatch):
+    block = one_region_block(tmp_path, monkeypatch, semantic_then(logic_reply()))
+    assert block["label"] == "unknown" and block["unknown_reason"] == "no-test-met"
+    assert block["reason"] and block["status"] == "classified"
+    assert "validator" not in trace_results(block)
+
+
+def test_a_structural_hint_is_never_a_label_and_skips_the_logic_prompt(tmp_path, monkeypatch):
+    calls = []
+
+    def call(model, system, user):
+        calls.append(system)
+        return json.dumps({"kind": "structural", "reason": "moved"})
+    block = one_region_block(tmp_path, monkeypatch, call)
+    assert len(calls) == 1
+    assert block["label"] == "unknown" and block["unknown_reason"] == "ambiguous"
+    assert block["candidate_labels"] is None
+    assert block["provenance"]["logic_prompt_hash"] is None
+
+
+def test_a_router_unknown_keeps_the_reason_of_the_model(tmp_path, monkeypatch):
+    block = one_region_block(tmp_path, monkeypatch,
+                             lambda m, s, u: json.dumps({"kind": "unknown", "reason": "too little text"}))
+    assert block["label"] == "unknown" and block["reason"] == "too little text"
+    assert block["unknown_reason"] == "router-unknown"
+
+
+def test_the_model_sees_the_base_of_the_region(tmp_path, monkeypatch):
+    seen = []
+
+    def call(model, system, user):
+        seen.append(user)
+        return json.dumps({"kind": "unknown", "reason": "not sure"})
+    one_region_block(tmp_path, monkeypatch, call, {"base_text": "x = 0"})
+    assert "BASE:\nx = 0" in seen[0]
+
+
+def test_a_failed_call_after_the_router_is_llm_error_with_no_label(tmp_path, monkeypatch):
+    block = one_region_block(tmp_path, monkeypatch, semantic_then("garbage"))
+    assert "label" not in block
+    assert (block["status"], block["reason"]) == ("llm-error", "invalid-answer")
+    assert (block["stage"], block["source"]) == (4, None)
+    assert trace_results(block) == {"router": "passed", "model-call": "failed"}
+    assert block["provenance"]["model_name"] == "good"
+    assert len(block["provenance"]["logic_prompt_hash"]) == 64
+    # One router reply plus the logic reply and its single retry
+    assert block["model_calls"] == 3
+
+
+def test_a_router_failure_has_no_logic_prompt_hash(tmp_path, monkeypatch):
+    block = one_region_block(tmp_path, monkeypatch, lambda m, s, u: "garbage")
+    assert block["status"] == "llm-error" and block["provenance"]["logic_prompt_hash"] is None
+
+
+def fail_with(error):
+    def call(model, system, user):
+        raise error
+    return call
+
+
+def test_truncated_output_is_llm_error_with_its_own_reason(tmp_path, monkeypatch):
+    block = one_region_block(tmp_path, monkeypatch, fail_with(providers.TruncatedOutput("good ran out of length")))
+    assert (block["status"], block["reason"]) == ("llm-error", "truncated-output")
+
+
+def test_a_selected_confluent_test_is_unknown_and_later_tests_do_not_take_over(tmp_path, monkeypatch):
+    reply = logic_reply(met=["confluent-interference", "business-logic-conflict"])
+    block = one_region_block(tmp_path, monkeypatch, semantic_then(reply))
+    assert block["label"] == "unknown" and block["unknown_reason"] == "no-context-lines"
+    assert trace_results(block)["confluent-interference"] == "passed"
+    assert trace_results(block)["context-lines"] == "failed"
+    assert block["confirming_test"] is None
+
+
+def test_confirming_test_names_what_decided_the_label(tmp_path, monkeypatch):
+    block = one_region_block(tmp_path, monkeypatch, semantic_then(logic_reply(met=["assignment-override"])))
+    assert block["confirming_test"] == "assignment-override"
+    write_inputs(tmp_path)
+    cli.main([str(tmp_path / "in.jsonl"), str(tmp_path / "all.jsonl"), "--model", "good", "--delay", "0"])
+    assert read_rows(tmp_path / "all.jsonl")[0]["classifier"]["confirming_test"] == "Lockfile"
+    assert read_rows(tmp_path / "all.jsonl")[0]["classifier"]["joint_use_lines"] == []
+
+
+def regions_in_one_file(tmp_path, count):
+    regions = [{"conflict_index": i, "ours_text": f"x = {i}", "theirs_text": f"x = {i + 9}",
+                "file_path": "src/one.ts"} for i in range(count)]
+    (tmp_path / "in.jsonl").write_text(json.dumps({"pr_key": "o/r#1", "regions": regions}) + "\n")
+    return [str(tmp_path / "in.jsonl"), str(tmp_path / "out.jsonl"), "--model", "good", "--delay", "0"]
+
+
+def test_the_ceiling_counts_calls_not_regions(tmp_path, monkeypatch):
+    args = regions_in_one_file(tmp_path, 3)
+    install_fakes(monkeypatch)
+    # A semantic region uses two calls, so two regions reach this ceiling of four
+    monkeypatch.setattr(pipeline, "PER_FILE_API_CALL_CAP", 4)
+    cli.main(args)
+    statuses = [row["classifier"]["status"] for row in read_rows(tmp_path / "out.jsonl")]
+    assert statuses == ["classified", "classified", "capped"]
+
+
+def test_the_ceiling_survives_a_resume(tmp_path, monkeypatch):
+    args = regions_in_one_file(tmp_path, 3)
+    install_fakes(monkeypatch)
+    monkeypatch.setattr(pipeline, "PER_FILE_API_CALL_CAP", 4)
+    cli.main(args)
+    rows = (tmp_path / "out.jsonl").read_text().splitlines()
+    (tmp_path / "out.jsonl").write_text("\n".join(rows[:2]) + "\n")
+    cli.main(args)
+    assert read_rows(tmp_path / "out.jsonl")[2]["classifier"]["status"] == "capped"
+
+
+def test_the_ceiling_is_per_file_within_a_pull_request(tmp_path, monkeypatch):
+    regions = [{"conflict_index": i, "ours_text": f"x = {i}", "theirs_text": f"x = {i + 9}",
+                "file_path": f"src/{name}.ts"} for i, name in enumerate(["one", "two"])]
+    (tmp_path / "in.jsonl").write_text(json.dumps({"pr_key": "o/r#1", "regions": regions}) + "\n")
+    install_fakes(monkeypatch)
+    monkeypatch.setattr(pipeline, "PER_FILE_API_CALL_CAP", 2)
+    cli.main([str(tmp_path / "in.jsonl"), str(tmp_path / "out.jsonl"), "--model", "good", "--delay", "0"])
+    assert [row["classifier"]["status"] for row in read_rows(tmp_path / "out.jsonl")] == ["classified"] * 2
+
+
+def test_a_transport_outage_is_llm_error_and_never_capped(tmp_path, monkeypatch):
+    args = regions_in_one_file(tmp_path, 3) + ["--max-retries", "2"]
+    install_fakes(monkeypatch)
+    monkeypatch.setattr(pipeline, "PER_FILE_API_CALL_CAP", 1)
+    monkeypatch.setattr(providers, "call_model", fail_with(RuntimeError("down")))
+    cli.main(args)
+    blocks = [row["classifier"] for row in read_rows(tmp_path / "out.jsonl")]
+    assert [b["reason"] for b in blocks] == ["transport-error"] * 3
+    assert all("label" not in b and b["model_calls"] == 0 for b in blocks)
+
+
+def test_llm_error_is_skipped_on_resume_and_retried_only_with_the_flag(tmp_path, monkeypatch):
+    args = regions_in_one_file(tmp_path, 1) + ["--max-retries", "1"]
+    install_fakes(monkeypatch)
+    healthy = providers.call_model
+    monkeypatch.setattr(providers, "call_model", fail_with(RuntimeError("down")))
+    cli.main(args)
+    assert read_rows(tmp_path / "out.jsonl")[0]["classifier"]["status"] == "llm-error"
+
+    monkeypatch.setattr(providers, "call_model", healthy)
+    cli.main(args)
+    assert read_rows(tmp_path / "out.jsonl")[0]["classifier"]["status"] == "llm-error"
+
+    cli.main(args + ["--retry-errors"])
+    rows = read_rows(tmp_path / "out.jsonl")
+    assert len(rows) == 1 and rows[0]["classifier"]["status"] == "classified"
+
+
+def test_retry_errors_leaves_finished_regions_alone(tmp_path, monkeypatch):
+    write_inputs(tmp_path)
+    install_fakes(monkeypatch)
+    out = tmp_path / "out.jsonl"
+    args = [str(tmp_path / "in.jsonl"), str(out), "--model", "good", "--delay", "0"]
+    cli.main(args)
+    before = read_rows(out)
+    cli.main(args + ["--retry-errors"])
+    assert read_rows(out) == before
+
+
+@pytest.mark.parametrize("extra", [["--models", "good"], ["--rerun"]])
+def test_retry_errors_refuses_other_run_modes(tmp_path, extra):
+    args = [str(tmp_path / "in.jsonl"), str(tmp_path / "out.jsonl"), "--retry-errors"] + extra
+    with pytest.raises(SystemExit):
+        cli.main(args)
+
+
+def test_max_retries_must_be_at_least_one(tmp_path):
+    with pytest.raises(SystemExit):
+        cli.main([str(tmp_path / "in.jsonl"), str(tmp_path / "out.jsonl"), "--max-retries", "0"])
+
+
+def test_a_missing_key_stops_before_any_record_is_written(tmp_path, monkeypatch):
+    write_inputs(tmp_path)
+    monkeypatch.setattr(providers, "check_available", lambda m: (False, "no api key found"))
+    with pytest.raises(SystemExit):
+        cli.main([str(tmp_path / "in.jsonl"), str(tmp_path / "out.jsonl"), "--model", "good"])
+    assert not (tmp_path / "out.jsonl").exists()
+
+
+def test_llm_error_is_not_scored_as_wrong(tmp_path, monkeypatch, capsys):
+    write_inputs(tmp_path)
+    install_fakes(monkeypatch)
+    monkeypatch.setattr(providers, "call_model", fail_with(providers.TruncatedOutput("cut")))
+    cli.main([str(tmp_path / "in.jsonl"), str(tmp_path / "out.jsonl"), "--models", "good", "--delay", "0"])
+    good = [l for l in capsys.readouterr().out.splitlines() if l.startswith("good")][0].split()
+    assert good[3:5] == ["0/0", "n/a"]
+
+
+def test_max_calls_stops_the_run_and_a_second_run_resumes(tmp_path, monkeypatch, capsys):
+    args = regions_in_one_file(tmp_path, 4) + ["--max-calls", "3"]
+    install_fakes(monkeypatch)
+    cli.main(args)
+    # The second region starts below the limit and finishes, so a run can pass it slightly
+    assert len(read_rows(tmp_path / "out.jsonl")) == 2
+    assert "reached the limit of 3 model calls" in capsys.readouterr().out
+    cli.main(args)
+    assert len(read_rows(tmp_path / "out.jsonl")) == 4
+
+
+def test_failures_in_a_row_stop_the_run_with_the_rest_unwritten(tmp_path, monkeypatch, capsys):
+    args = regions_in_one_file(tmp_path, 6) + ["--max-retries", "1"]
+    install_fakes(monkeypatch)
+    monkeypatch.setattr(pipeline, "MAX_CONSECUTIVE_LLM_ERRORS", 2)
+    monkeypatch.setattr(providers, "call_model", fail_with(RuntimeError("down")))
+    cli.main(args)
+    assert len(read_rows(tmp_path / "out.jsonl")) == 2
+    assert "2 model failures in a row" in capsys.readouterr().out
+
+
+def test_a_good_answer_resets_the_failures_in_a_row(tmp_path, monkeypatch):
+    args = regions_in_one_file(tmp_path, 5) + ["--max-retries", "1"]
+    install_fakes(monkeypatch)
+    monkeypatch.setattr(pipeline, "MAX_CONSECUTIVE_LLM_ERRORS", 2)
+    calls = []
+
+    def flaky(model, system, user):
+        calls.append(1)
+        if len(calls) % 3 == 1:
+            raise RuntimeError("down")
+        return json.dumps({"kind": "unknown", "reason": "not sure"})
+    monkeypatch.setattr(providers, "call_model", flaky)
+    cli.main(args)
+    assert len(read_rows(tmp_path / "out.jsonl")) == 5
+
+
+def test_token_usage_is_counted_and_printed(tmp_path, monkeypatch, capsys):
+    args = regions_in_one_file(tmp_path, 1)
+    install_fakes(monkeypatch)
+
+    def call(model, system, user):
+        providers.USAGE["input"] += 10
+        providers.USAGE["output"] += 2
+        return json.dumps({"kind": "unknown", "reason": "not sure"})
+    monkeypatch.setattr(providers, "call_model", call)
+    cli.main(args)
+    assert "tokens for good: 10 input, 2 output" in capsys.readouterr().out
+
+
+def test_provenance_records_the_real_model_and_not_the_alias(tmp_path, monkeypatch):
+    args = regions_in_one_file(tmp_path, 1)
+    args[args.index("good")] = "hackclub-classify"
+    install_fakes(monkeypatch)
+    cli.main(args)
+    block = read_rows(tmp_path / "out.jsonl")[0]["classifier"]
+    assert block["provenance"]["model_name"] == "hackclub/openai/gpt-6-luna"

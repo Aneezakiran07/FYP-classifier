@@ -5,7 +5,9 @@ import argparse
 import os
 
 from classifier.llm import classify_llm, providers
-from classifier.llm.classify_llm import DEFAULT_DELAY_BETWEEN_CALLS_SECONDS, DEFAULT_MODEL_NAME
+from classifier.llm.classify_llm import (
+    DEFAULT_DELAY_BETWEEN_CALLS_SECONDS, DEFAULT_MAX_CALL_ATTEMPTS, DEFAULT_MODEL_NAME,
+)
 from classifier.pipeline import run_one
 from classifier.report import load_ground_truth, print_table, summarize_model
 
@@ -15,6 +17,12 @@ def output_path_for_model(output_path, model):
     root, ext = os.path.splitext(output_path)
     safe = model.replace("/", "_").replace(":", "_")
     return f"{root}.{safe}{ext or '.jsonl'}"
+
+def print_usage(model):
+    # The cost itself depends on the price of the model on the day of the run
+    usage = providers.USAGE
+    print(f"tokens for {model}: {usage['input']} input, {usage['output']} output")
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
@@ -30,20 +38,34 @@ def main(argv=None):
                         help="Comma separated model names, runs the same input through each and writes one output file per model")
     parser.add_argument("--labels", type=str, default=None,
                         help="Hand labels jsonl used for the accuracy columns, defaults to sample_labels.jsonl next to the input")
-    parser.add_argument("--max-retries", type=int, default=0,
-                        help="Give up on a failing model call after this many tries, 0 retries forever")
+    parser.add_argument("--max-retries", type=int, default=DEFAULT_MAX_CALL_ATTEMPTS,
+                        help=f"Give up on a failing model call after this many tries, defaults to {DEFAULT_MAX_CALL_ATTEMPTS}")
     parser.add_argument("--rerun", action="store_true",
                         help="Classify every region in the input again and overwrite only those records")
+    parser.add_argument("--retry-errors", action="store_true",
+                        help="Classify the llm-error regions again against one model and overwrite those records")
+    parser.add_argument("--max-calls", type=int, default=None,
+                        help="Stop the run after this many model calls, run the same command again to resume")
     args = parser.parse_args(argv)
+    if args.max_retries < 1:
+        parser.error("--max-retries must be at least 1")
+    if args.retry_errors and (args.models or args.rerun):
+        parser.error("--retry-errors runs against one model and cannot be used with --models or --rerun")
 
     classify_llm.DELAY_BETWEEN_CALLS_SECONDS = args.delay
-    classify_llm.MAX_CALL_RETRIES = args.max_retries
+    classify_llm.MAX_CALL_ATTEMPTS = args.max_retries
     print(f"Using a delay of {classify_llm.DELAY_BETWEEN_CALLS_SECONDS} seconds between calls")
 
     if not args.models:
+        # Stops here so a missing key does not fill the output with llm-error records
+        ok, warning = providers.check_available(args.model)
+        if not ok:
+            parser.error(f"model {args.model} is not available, {warning}")
         classify_llm.MODEL_NAME = args.model
         print(f"Using model {classify_llm.MODEL_NAME}")
-        run_one(args.input_path, args.output_path, args.rerun)
+        providers.USAGE.clear()
+        run_one(args.input_path, args.output_path, args.rerun, args.retry_errors, args.max_calls)
+        print_usage(args.model)
         print("Done")
         return
 
@@ -61,7 +83,9 @@ def main(argv=None):
         classify_llm.MODEL_NAME = model
         model_output = output_path_for_model(args.output_path, model)
         print(f"\n=== {model} -> {model_output}")
-        run_one(args.input_path, model_output, args.rerun)
+        providers.USAGE.clear()
+        run_one(args.input_path, model_output, args.rerun, max_calls=args.max_calls)
+        print_usage(model)
         rows.append(summarize_model(model, truth))
 
     print()

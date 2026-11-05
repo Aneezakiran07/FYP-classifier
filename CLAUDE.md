@@ -1,6 +1,6 @@
 # CLAUDE.md: AST Git Resolver classifier
 
-Read this whole file before you touch anything. It is the design of the classifier, taken from the FYP report
+Start with `docs/START_HERE.md` for the current state and who does what next. Read this whole file before you touch anything. It is the design of the classifier, taken from the FYP report
 (FAST NUCES Lahore, supervisor Mr. Muhammad Waqas Manzoor). Authors: Aneeza (LLM side) and Fatima (rules side).
 The classifier assigns one of 23 labels to every merge conflict region. Stages 0 to 3 are rules. Stage 4 is the only LLM stage.
 
@@ -11,7 +11,6 @@ The classifier assigns one of 23 labels to every merge conflict region. Stages 0
 - If the report and the code are both silent, ask. Do not guess. Section 12 lists what is already known to be open.
 - The dev set is for tuning. The test set is touched only once, for the final numbers.
 - Run `pytest tests/rules`, `pytest tests/llm` and `pytest tests/test_pipeline.py` after every change. Report the result honestly. Never edit a test just to make it pass. Show every test change to the user for approval.
-- Three tests already failed before the refactor (11 patterns expected but 14 exist, and two whitespace cases where the pattern layer fires before the gate). They are Fatima's. Do not fix them unless asked.
 - Tests use a fake provider. No real API calls in tests.
 - Money: Hack Club gives 3 dollars per day. Never start a full run without a dry run, a row count and a cost estimate first. Smoke test about 100 rows first.
 - Code comments: plain English sentences, one space after the hash, no dashes, no em dashes, no arrows, no symbols, no markdown, no end punctuation. Example: `# strips whitespace from all text columns before comparison`. Keep functions small with plain English names.
@@ -160,9 +159,9 @@ src/classifier/
   cli.py  report.py  shared
   rules/             Fatima: ast_diff.py, ast_gate.py, patterns/, validators.py
   llm/               Aneeza: prompts.py, prompt_builder.py, providers.py, parsing.py, classify_llm.py, few_shot.json
-scripts/             build_few_shot.py, run_funnel.py, make_split.py, evaluate.py
-tests/rules  tests/llm  tests/test_pipeline.py
-docs/                TEAM_GUIDE.md, classifier_design_from_report.md, decisions.md
+scripts/             build_few_shot.py, make_split.py, make_smoke_input.py, and later run_funnel.py, evaluate.py
+tests/rules  tests/llm  tests/test_pipeline.py  tests/test_schema.py  tests/test_make_split.py
+docs/                START_HERE.md, PROGRESS.md, TEAM_GUIDE.md, classifier_design_from_report.md, decisions.md
 data/  outputs/      data is mostly gitignored, outputs are never committed
 ```
 Contract between the two sides (only `pipeline.py` calls them, signatures stay stable):
@@ -170,7 +169,7 @@ Contract between the two sides (only `pipeline.py` calls them, signatures stay s
 | Function | Side | Returns |
 |---|---|---|
 | `rules.run_stages_0_to_3(region)` | rules | a Result, or None meaning go to Stage 4 |
-| `llm.route(region, ast_verdict)` | llm | structural, semantic or unknown |
+| `llm.route(region, ast_verdict)` | llm | the kind (structural, semantic or unknown) and a reason |
 | `llm.run_logic_tests(region, ast_verdict)` | llm | 7 TestAnswer objects with test_id, met, evidence |
 | `rules.confirm_structural(region, ast_verdict)` | rules | a structural label or None |
 | `rules.validate_logic_test(region, test_id, evidence)` | rules | True or False |
@@ -185,16 +184,11 @@ Report accuracy for the rules part and the LLM part separately, plus counts of u
 Phase 2 build order: (1) classifier block and `schema.py`, (2) stage order with Stage 0 and 1 and the full trace, (3) export-shape in Stage 3 (limited to detecting an exported signature change inside the region with needs_verification set, ask before going further), (4) router prompt then the 7 logic tests prompt with evidence per test, first met test wins, (5) deterministic validator per test (propose the checks and wait for approval), (6) `capped` and `llm-error` as statuses with no label, (7) changed names, confirming test, empty joint use lines, confluent-interference as unknown, (8) `--no-llm` and `scripts/run_funnel.py`, then `make_split.py` and `evaluate.py`. Stop and report after each step.
 
 ## 12. Open decisions (the report is silent, so ask, do not guess)
-Record each answer in `docs/decisions.md` when it is made.
-- Value of status for a normal labeled region (proposed `classified`).
-- Exact lists for Stage 0: which extensions count as TypeScript, prose, config and lockfile (the report scopes to TypeScript, so `.js`, `.jsx`, `.mjs` and `.css` are out of scope unless they are config), and whether a lockfile name beats the binary check for `bun.lockb`.
-- What label a no-marker region gets when it is not a deletion.
-- What happens when the model marks no test as met (proposed `unknown` with reason `no-test-met`).
-- Whether `other`, null or low confidence answers from the model map to `unknown` (proposed yes for `other` and null; no confidence threshold in the classifier).
-- Exact numbers: per file call ceiling, retry attempts for transport errors.
+Record each answer in `docs/decisions.md` when it is made. Entries D3 to D8 hold the answers so far, including status values, Stage 0 lists, no-marker regions, no test met, the removed confidence answers, the call ceiling and retries.
+Still open:
 - What exactly counts as a changed name.
 - Which checks the deterministic validators run (Fatima proposes, Aneeza agrees).
-- Source value for a structural label confirmed by a rule after the model's hint (proposed `model`).
+- Source value for a structural label confirmed by a rule after the model's hint (proposed `model`, needs a final answer when `confirm_structural` is built).
 
 ## 13. Devlogs
 When the user asks for a devlog, use this exact format and nothing else:

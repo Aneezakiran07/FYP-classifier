@@ -1,27 +1,11 @@
-# turns raw model replies into plain dictionaries
+# turns raw model replies into plain values
 # owned by Aneeza
 
 import json
 
-from classifier.llm.prompts import SUBTYPES
+from classifier.llm.prompts import LOGIC_TESTS
+from classifier.schema import TestAnswer
 
-
-# SUBTYPES now holds v3 logic/* labels. "other" is still allowed as the
-# model's escape hatch. classify_with_llm maps both "other" and a low
-# confidence answer to unknown with the raw answer preserved, following
-# taxonomy rule 15 (business-logic-conflict is the residual, only after
-# the other six tests fail).
-VALID_LOGIC_SUBTYPES = set(SUBTYPES) | {"other"}
-
-def clean_optional_text(value):
-    # The model sometimes returns the string null or an empty string
-    # instead of a real null, this turns those into None and keeps real text
-    if not isinstance(value, str):
-        return None
-    stripped = value.strip()
-    if not stripped or stripped.lower() == "null":
-        return None
-    return stripped
 
 def load_json_object(raw_text):
     # Pull a json object out of a model reply, some models add fences anyway
@@ -37,8 +21,9 @@ def load_json_object(raw_text):
         return None
     return parsed if isinstance(parsed, dict) else None
 
+
 def parse_kind_response(raw_text):
-    # Prompt A answer, kind and a required reason
+    # Router answer, kind and a required reason
     parsed = load_json_object(raw_text)
     if parsed is None or parsed.get("kind") not in ("structural", "semantic", "unknown"):
         return None
@@ -47,19 +32,22 @@ def parse_kind_response(raw_text):
         return None
     return {"kind": parsed["kind"], "reason": reason.strip()}
 
-def parse_subtype_response(raw_text):
-    # Prompt B answer, a null subtype is allowed and is treated as other later
+
+def parse_test_answer(item, expected_id):
+    # One test answer must name the expected test and carry a flag and evidence
+    if not isinstance(item, dict) or item.get("test_id") != expected_id:
+        return None
+    met, evidence = item.get("met"), item.get("evidence")
+    if not isinstance(met, bool) or not isinstance(evidence, str) or not evidence.strip():
+        return None
+    return TestAnswer(expected_id, met, evidence.strip())
+
+
+def parse_logic_tests_response(raw_text):
+    # Logic answer, all seven tests in the fixed order or the shape is invalid
     parsed = load_json_object(raw_text)
-    if parsed is None or "subtype" not in parsed:
+    items = parsed.get("tests") if parsed else None
+    if not isinstance(items, list) or len(items) != len(LOGIC_TESTS):
         return None
-    subtype = clean_optional_text(parsed.get("subtype"))
-    if subtype is not None and subtype not in VALID_LOGIC_SUBTYPES:
-        return None
-    confidence = parsed.get("confidence")
-    if confidence not in ("high", "medium", "low"):
-        return None
-    return {
-        "subtype": subtype,
-        "confidence": confidence,
-        "evidence": clean_optional_text(parsed.get("evidence")),
-    }
+    answers = [parse_test_answer(item, test_id) for item, test_id in zip(items, LOGIC_TESTS)]
+    return None if None in answers else answers

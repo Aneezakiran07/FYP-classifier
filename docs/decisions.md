@@ -130,3 +130,64 @@ Aneeza asked for the known rule bugs to be fixed in place so `main` does not car
 
 ### Known and not fixed
 - `DisjointEdits` cannot check for a joint use outside the region because the data has no context lines.
+
+## D5. Stage 4 prompts, Phase 2 step 4 (2026-11-05)
+
+Built on Aneeza's go ahead. `pipeline.py` is shared, so Fatima should review the Stage 4 part.
+
+### Built to match the report
+- The router asks for `structural`, `semantic` or `unknown`. The logic prompt presents seven tests in Table 5.1 order and the model answers every test with evidence.
+- The pipeline selects the first test marked as met. The model never names a label.
+- Both prompts now receive the base. An empty base says both sides are additions. No base says the direction of change is unknown.
+- A structural hint never becomes a label. Until `confirm_structural` exists it is `unknown` with reason `ambiguous`, and the invented candidate labels are gone.
+- Each prompt has a version string, recorded in provenance next to its hash.
+- Few shot examples for the logic prompt must carry hand labeled `test_answers` in the per test format. An example without them is left out of that prompt, because the seven answers cannot be derived from a label alone.
+
+### Agreed by Aneeza, the report is silent on these
+- No test met gives `unknown` with reason `no-test-met`.
+- `other`, `null` and the confidence field are removed from the model answer, so there is no confidence threshold in the classifier.
+- A test id is the name of the label it supports, so no mapping table is needed.
+- `llm.route` returns the kind and the reason together, because a router `unknown` needs a reason. The contract in `CLAUDE.md` names only the kind. Fatima still needs to agree to this one, because the contract is shared.
+- A test after the selected one is `skipped` in the trace even when the model marked it as met, and the answer of the model is kept on that entry.
+
+### Temporary until later steps
+- No validator exists yet, so a selected label is written with `needs_verification` true and a `validator` trace entry of `skipped` with reason `validator-not-built`. No full run should happen before step 5.
+- Rule stages write no trace yet, so the trace only covers Stage 4 for now.
+
+## D6. Failure handling and the call ceiling, Phase 2 step 6 and part of step 7 (2026-11-05)
+
+`pipeline.py`, `cli.py` and `report.py` are shared, so Fatima should review this.
+
+### Built to match the report
+- A failed call or an invalid answer is `llm-error` with no label and no source. It is never counted as `unknown`. The model name and prompt hashes stay in provenance.
+- Every call uses temperature zero. A reply that ran out of length is thrown away and is `llm-error` with reason `truncated-output`, with no retry.
+- A format error is retried once with a stricter reminder. A wrong answer is not retried.
+- A selected `confluent-interference` test is `unknown` with reason `no-context-lines`, and a later test does not take over.
+- `confirming_test` is the selected test for a model label, and the pattern or AST verdict for a rule label.
+- Joint use lines stay empty. Changed names are not done, because they wait for a definition agreed with Fatima.
+
+### Chosen because the report is silent, Aneeza gave the go ahead
+- Reason codes for `llm-error`: `provider-unavailable`, `provider-rejected`, `transport-error`, `invalid-answer`, `truncated-output`.
+- Transport errors get at most 5 attempts in total, with backoff. `--max-retries` changes that number and 0 no longer means forever.
+- Status codes 400, 401, 403 and 404 are not retried, because sending the same request again cannot help.
+- Error text from a provider is not written to the record or printed, because it can echo a key. Only the error type and status code are kept.
+- The ceiling counts model replies per file within one pull request, including format retries, and not failed transport attempts. A transport outage therefore gives `llm-error`, not `capped`.
+- The count is stored in the block as `model_calls`, so it survives a resume.
+- The ceiling is 50 calls per file. The old value of 15 counted regions, not calls. On the 14,013 regions of `final_dataset.jsonl` that reach the model, if every region uses two calls, 50 calls caps 103 regions in 8 files. 30 calls would cap 241 and 15 would cap 998. A region that starts below the ceiling finishes, so a file can pass 50 slightly.
+- An `llm-error` is skipped on resume. `--retry-errors` runs those regions again against one model and overwrites their records. A rerun is free to restart the count.
+- A single model run stops at the start when its key or SDK is missing, so a bad setup does not write thousands of `llm-error` records.
+
+## D7. The three old rules test failures (2026-11-05)
+
+Aneeza asked for these to be fixed. They were stale tests, so the tests changed and the code did not. Fatima should review them, since `tests/rules/` is hers.
+
+- The registry test expected 11 patterns, and there are 14. It now pins the 14 names in stage order, which also catches a pattern moved to the wrong stage.
+- Two whitespace cases expected the AST gate to decide, but the `WhitespaceOnly` pattern decides them first. Both are Stage 2 and give the same label. These two inputs now assert the pattern decides.
+- Two new inputs that do reach the gate replace them in the gate test: fragments that do not parse and hold a regex or JSX. This keeps coverage of the gate's whitespace verdict.
+- `CLAUDE.md` section 0 and `docs/TEAM_GUIDE.md` section 9 still mention these failures. They need updating once Fatima agrees.
+
+## D8. Merging without waiting for review (2026-11-05)
+
+Aneeza decided to merge the work in D4 to D7 to `main` without waiting for Fatima's review, so both can start from one state. This includes changes to shared files and to `tests/rules/`. Wherever D4 to D7 say Fatima should review, read it as: Fatima was not asked first and can still change it. `docs/START_HERE.md` lists what to check.
+
+The split in `scripts/make_split.py` is also our choice, because the report gives no ratios: 70 percent train, 15 percent dev and 15 percent test, seed 20261105, stratified by the file count bucket. It is not stratified by agent, because `filtered_prs.csv` is not in the repo. Adding the agent would change which pull requests land in each set, so decide before anyone hand labels the dev set.

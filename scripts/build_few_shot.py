@@ -1,8 +1,9 @@
 import argparse
 import json
 
-from classifier.llm.prompts import FEW_SHOT_PATH, SUBTYPES
+from classifier.llm.prompts import FEW_SHOT_PATH, LOGIC_TESTS
 from classifier.rules.ast_diff import compute_ast_equivalence
+from classifier.schema import strip_family
 
 # Reads the hand labels and the raw regions, keeps up to two real examples
 # per subtype and writes few_shot_examples.json, nothing is ever invented
@@ -30,13 +31,13 @@ def main():
                 key = region_key(record.get("pr_key"), region.get("file_path"), region.get("conflict_index"))
                 regions[key] = region
 
-    picked = {subtype: [] for subtype in SUBTYPES}
+    picked = {subtype: [] for subtype in LOGIC_TESTS}
     with open(args.labels_path, "r", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
                 continue
             label = json.loads(line)
-            true_label = label.get("true_label")
+            true_label = strip_family(label.get("true_label"))
             key = region_key(label.get("pr_key"), label.get("file_path"), label.get("conflict_index"))
             region = regions.get(key)
             if true_label not in picked or region is None or len(picked[true_label]) >= args.per_subtype:
@@ -45,19 +46,21 @@ def main():
             eq = compute_ast_equivalence(label.get("file_path"), ours, theirs)
             picked[true_label].append({
                 "file_path": label.get("file_path"),
+                "base": region.get("base_text"),
                 "ours": ours,
                 "theirs": theirs,
                 "ast_equivalence": {"equivalence": eq.equivalence, "renames": eq.renames,
                                     "changed_nodes": eq.changed_nodes},
                 "true_label": true_label,
                 "notes": label.get("notes"),
+                "test_answers": label.get("test_answers"),
             })
 
-    examples = [ex for subtype in SUBTYPES for ex in picked[subtype]]
+    examples = [ex for subtype in LOGIC_TESTS for ex in picked[subtype]]
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(examples, f, indent=2)
     print(f"Wrote {len(examples)} examples to {args.out}")
-    for subtype in SUBTYPES:
+    for subtype in LOGIC_TESTS:
         if len(picked[subtype]) < args.per_subtype:
             print(f"Gap, {subtype} has {len(picked[subtype])} of {args.per_subtype} examples")
 

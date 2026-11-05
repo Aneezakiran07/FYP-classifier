@@ -2,7 +2,7 @@
 
 Who owns what, what each folder does, and who does which task. Keep it in the repo at `docs/TEAM_GUIDE.md`.
 Two files outrank it: `docs/classifier_design_from_report.md` (the report design) and `CLAUDE.md`.
-Dataset decisions live in `docs/decisions.md`.
+Dataset decisions live in `docs/decisions.md`. For the current state and next tasks, read `docs/START_HERE.md` first.
 
 **Short version.** Aneeza does the LLM side: prompts, prompt tuning, parsing, providers, few shot examples.
 Fatima does the rules side: Stages 0 to 3, the AST engine, patterns and validators.
@@ -68,7 +68,7 @@ If you need something from the other side, ask for a function in the contract be
 | Function | Side | Returns |
 |---|---|---|
 | `rules.run_stages_0_to_3(region)` | rules | a Result, or None meaning go to Stage 4 |
-| `llm.route(region, ast_verdict)` | llm | structural, semantic or unknown |
+| `llm.route(region, ast_verdict)` | llm | the kind (structural, semantic or unknown) and a reason |
 | `llm.run_logic_tests(region, ast_verdict)` | llm | 7 TestAnswer objects with test_id, met, evidence |
 | `rules.confirm_structural(region, ast_verdict)` | rules | a structural label or None |
 | `rules.validate_logic_test(region, test_id, evidence)` | rules | True or False |
@@ -147,7 +147,6 @@ Follow this order and stop to review after each step.
 Report accuracy for the rules part and the LLM part separately, plus counts of unknown, capped and llm-error.
 
 ## 9. Open decisions for both of us
-- The 3 tests that already fail in the original code: a stale assertion of 11 patterns (there are 14), and two whitespace cases where the pattern layer now fires before the AST gate. These are rules tests, so Fatima decides whether to update the tests or change the code.
 - Which person labels which part of the dev set.
 - The proposed lead and reviewer split in section 6.
 
