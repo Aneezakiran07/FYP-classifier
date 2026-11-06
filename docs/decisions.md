@@ -191,3 +191,44 @@ Aneeza asked for these to be fixed. They were stale tests, so the tests changed 
 Aneeza decided to merge the work in D4 to D7 to `main` without waiting for Fatima's review, so both can start from one state. This includes changes to shared files and to `tests/rules/`. Wherever D4 to D7 say Fatima should review, read it as: Fatima was not asked first and can still change it. `docs/START_HERE.md` lists what to check.
 
 The split in `scripts/make_split.py` is also our choice, because the report gives no ratios: 70 percent train, 15 percent dev and 15 percent test, seed 20261105, stratified by the file count bucket. It is not stratified by agent, because `filtered_prs.csv` is not in the repo. Adding the agent would change which pull requests land in each set, so decide before anyone hand labels the dev set.
+
+## D9. Rename guard change after reviewing the rename regions (2026-11-06)
+
+Fatima reviewed the rename guard from D4 and changed it. Aneeza agreed to this entry.
+
+### What was found
+The parser calls 434 regions in train and dev a rename. The old guard kept 40 of them. Most rejections were right, for example a renamed import, a renamed method call, or a name declared outside the region. Two kinds of mistake were found.
+- A renamed named export was kept as a local rename. Other files import that name, so it is not local. Table 5.1 has a separate export-shape label for this.
+- Array destructuring and catch parameters were rejected, even though they declare local names. Array destructuring is by position, so a new name is a real local rename.
+- A bare `type X` inside an import list was counted as a declaration. The name comes from another file.
+
+### What changed in `ast_gate.py`
+- A named export (`export const x`, `export function x`, `export { x }`) fails the guard. A default export does not, because each importing file picks its own name.
+- `const [a, b] = ...`, `let [a, b] = ...` and `catch (e)` count as declarations.
+- `type X` counts as a declaration only for a type alias (`type X =` or `type X<T> =`).
+- Object destructuring was left out on purpose. The name picks which property is read, so a new name changes behavior.
+- The stale comment about a "clarification document" and the rule 10 graph check was replaced.
+
+### The comparison
+Old guard against new guard on every parser rename region, train and dev only.
+
+| Result | Regions |
+|---|---|
+| Kept by both | 29 |
+| Rejected by both | 387 |
+| Newly kept | 11 |
+| Newly rejected | 6 |
+| Failed the newline or directive guard | 1 |
+
+All 17 changed regions were read by hand. The newly kept ones are array destructuring and one catch parameter. The newly rejected ones are named exports and a type name in an import list. The first look also covered the test split before the scripts were limited to train and dev. The change rests on what the code means and not on test examples, and the test split is not used again until the final numbers.
+
+Reproduce with `python scripts/review_rename_guard.py` and `python scripts/compare_rename_guard.py`. Both need `data/splits/split.jsonl` from `scripts/make_split.py`.
+
+### Known limits
+- The guard reads the region text with regular expressions, so a declaration inside a comment or a string would still match.
+- A kept rename is only checked inside the region. The same name may be used elsewhere in the file, and the data has no context lines.
+- A rename that also changes or drops a comment still counts as a rename. This is about 4 regions in the first look.
+
+### Open
+- Should a rename plus a comment change still be `rename`? The report says "consistent identifier rename, nothing else".
+- Where did the "clarification document" in the old comment come from? It is not in the report extract.
