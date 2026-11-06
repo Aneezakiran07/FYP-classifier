@@ -7,13 +7,10 @@ from .patterns.comments_only import DIRECTIVE_PATTERN
 from .patterns.whitespace_only import _asi_sensitive_count
 
 
-# The ast gate turns a parser verdict into a label with no model call.
-# Values are the seven gate equivalences, labels are the v3 taxonomy labels.
-# compute_ast_equivalence returns "identical" only on byte equality, so the
-# rule-1 guard is satisfied upstream. Rename is mapped directly to
-# structural/rename, without the rule-10 graph check, because v3 has no
-# dependency graph and the clarification document says rename fires
-# whenever a bijective identifier rename is detected.
+# The ast gate turns a parser verdict into a label with no model call
+# Values are the seven gate equivalences, labels are the taxonomy labels
+# A rename counts only when every old name is declared inside the region
+# and none of the old names is a named export, see the rename guard below
 GATE_LABELS = {
     "identical": ("mechanical/same-change", "both sides are byte identical"),
     "whitespace_only": ("mechanical/whitespace-only", "parser shows the sides differ in whitespace or layout only"),
@@ -37,20 +34,48 @@ def parameter_names(text):
     return names
 
 
+def declaration_patterns(name):
+    # The ways a name can be declared inside a region
+    escaped = re.escape(name)
+    word = rf"(?<![\w$]){escaped}(?![\w$])"
+    return [
+        rf"\b(?:const|let|var|function|class|interface|enum)\s+{escaped}(?![\w$])",
+        # A type alias has a type parameter list or an equals sign after the name
+        # A bare type before a name is an import or export specifier
+        rf"\btype\s+{escaped}\s*[<=]",
+        rf"(?<![\w$.]){escaped}\s*=>",
+        # Array destructuring is by position so a new name is a real local rename
+        # Object destructuring is left out because the name picks which property is read
+        rf"\b(?:const|let|var)\s*\[[^\]]*{word}",
+        rf"\bcatch\s*\(\s*{escaped}(?![\w$])",
+    ]
+
+
 def is_declared_in_region(name, text):
     # Looks for a local declaration or a parameter of this name
-    escaped = re.escape(name)
-    keyword = rf"\b(?:const|let|var|function|class|type|interface|enum)\s+{escaped}(?![\w$])"
-    single_arrow = rf"(?<![\w$.]){escaped}\s*=>"
-    if re.search(keyword, text or "") or re.search(single_arrow, text or ""):
-        return True
+    for pattern in declaration_patterns(name):
+        if re.search(pattern, text or ""):
+            return True
     return name in parameter_names(text)
+
+
+def is_named_export(name, text):
+    # A default export is not matched because importers choose their own name for it
+    escaped = re.escape(name)
+    declared = rf"\bexport\s+(?:declare\s+|abstract\s+|async\s+)*(?:const|let|var|function|class|type|interface|enum)\s+{escaped}(?![\w$])"
+    listed = rf"\bexport\s*\{{[^}}]*(?<![\w$]){escaped}(?![\w$])"
+    return bool(re.search(declared, text or "") or re.search(listed, text or ""))
 
 
 def is_local_rename(eq, ours_text):
     # The report says renamed local identifiers, so every old name must be declared here
-    # Swapping a called function or a property has the same token shape but changes behavior
-    return all(is_declared_in_region(old_name, ours_text) for old_name in eq.renames)
+    # A named export is not local because other files import it
+    for old_name in eq.renames:
+        if is_named_export(old_name, ours_text):
+            return False
+        if not is_declared_in_region(old_name, ours_text):
+            return False
+    return True
 
 
 def directive_lines(text):
