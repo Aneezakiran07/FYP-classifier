@@ -282,3 +282,49 @@ An unknown test id fails. On the 67 smoke records with a met test, 60 pass both 
 - The table of checks above, mainly whether any check is too strict for real answers. The 7 smoke records that fail are listed by `scripts/measure_validators.py`.
 - The `model` source for a confirmed structural label.
 - Nothing else waits on her. Fatima continues with `confirm_structural` checks, the Stage 0 to 3 trace, `export-shape` and `--no-llm`.
+
+## D11. `--no-llm` and the rules only funnel, Phase 2 step 8 (2026-11-07)
+
+Fatima built these. `cli.py`, `pipeline.py`, `report.py` and `tests/test_pipeline.py` are shared, so Aneeza should review. Nothing in `llm/`, `rules/` or `tests/llm/` changed.
+
+### `--no-llm` in `cli.py`
+- Runs Stages 0 to 3 as usual and skips Stage 4 by choice. No model is called and no API key is checked, so it runs on a laptop with no key.
+- **A region that reaches Stage 4 gets no record.** It is counted, and the report prints `reached Stage 4 with the model off, no record written`. It is never written as `capped`, because `capped` means the call ceiling was hit (report 6.4.5 and `CLAUDE.md` section 11).
+- Why no record, and not a new status: a new status would change the frozen status set in `schema.py` (D3). Every resume rule would also have to treat it as unfinished. With no record, a later normal run on the same input and output resumes and classifies only the regions that reached Stage 4. The rule records are reused, and the model is called only for the regions that need it.
+- `CLAUDE.md` section 7 says a region that fails still produces a record. A region skipped by `--no-llm` has not failed, and a real run with the model still writes a record for every region. The output of a `--no-llm` run is a partial file on purpose. The funnel counts the missing regions from the input.
+- `--no-llm` refuses `--models`, `--retry-errors` and `--max-calls`, because they only make sense with a model.
+- `--no-llm` also refuses `--rerun`. A region that reaches Stage 4 writes nothing, so an old model record for that key would survive the rerun and mix into the counts. To count again, start from an empty output file. `run_funnel.py` does this with `--overwrite`.
+- `rules.jsonl` from the funnel is not a complete run. Regions that reached Stage 4 have no record there, so `evaluate.py` must not score it as one.
+- `pipeline.run_one` and the functions it calls take a new `use_llm` argument, true by default. Nothing changes for a normal run.
+
+### `scripts/run_funnel.py`
+- Reads `data/raw/final_dataset.jsonl` and `data/splits/split.jsonl`, keeps the chosen splits, and runs the normal pipeline with the model off. It writes four files to `outputs/funnel/`: `input.jsonl`, `rules.jsonl`, `run.log` and `summary.json`.
+- **Train and dev by default.** The test split needs `--splits test` or a list that includes it, plus `--include-test`. Without the flag the script refuses, because the test set is used only once, for the final numbers.
+- It counts marker regions by the stage that decided them, and how many reached Stage 4. The same counts are shown for `.ts` and `.tsx` alone, because the report figures are given that way.
+- It counts each deciding rule with its label. The rule is the pattern name, or the AST verdict for the gate, taken from `confirming_test`.
+- No marker records are counted apart and are not part of the region numbers (`CLAUDE.md` section 8).
+- It refuses to write over an earlier `rules.jsonl` unless `--overwrite` is given, so model records from another run cannot mix into the counts.
+- The pipeline prints one line per region, so that output goes to `run.log`. The summary is printed and also saved as JSON for the report.
+- It prints the population (dataset and splits), because the two populations in `CLAUDE.md` section 8 must never be mixed.
+
+### Tests
+- Three new tests in `tests/test_pipeline.py`. `--no-llm` writes only rule records, calls no model and needs no key. A normal run after it classifies only the Stage 4 regions and keeps the rule records unchanged. `--no-llm` refuses options that need a model.
+- New file `tests/test_run_funnel.py` with four tests: the counts per stage and per rule, the test split left out unless asked for, no silent overwrite, and an unknown split name refused. A fake model fails the test if it is ever called.
+- No existing test was changed.
+
+### First funnel numbers (2026-11-07)
+Population: `final_dataset.jsonl`, train and dev only, 3,502 pull requests, 30,355 marker regions (15,247 in `.ts` or `.tsx`) and 1,061 no marker records. A separate count straight from the dataset matched every number (`check_funnel_counts.py`, not committed).
+
+| Stage | All marker regions | `.ts` and `.tsx` |
+|---|---|---|
+| Stage 0 scope | 1,673 (5.5%) | 5 (0.0%) |
+| Stage 1 identity | 562 (1.9%) | 509 (3.3%) |
+| Stage 2 shape | 1,447 (4.8%) | 804 (5.3%) |
+| Stage 3 boundary | 14,793 (48.7%) | 2,142 (14.0%) |
+| Reached Stage 4 | 11,880 (39.1%) | 11,787 (77.3%) |
+
+- Lockfiles alone are 11,711 regions, which is most of Stage 3. Without lockfiles the rules decide far less, so the `.ts` and `.tsx` column is the honest figure for code: the rules decide 22.7 percent of it.
+- `DisjointEdits` decides 1,946 regions, 1,934 of them TypeScript. This is the largest rule label on code, and it cannot check for a joint use outside the region because the data has no context lines (D4). Check it first when hand labeling dev.
+- `rename` decides 39 regions after the D9 guard.
+- No marker records: 584 one side deletions as `business-logic-conflict`, 477 `unknown`.
+- 11,880 of 30,355 is 39.1 percent. D6 counted 14,013 of 35,241 on the whole dataset, 39.8 percent, so train and dev look like the whole.

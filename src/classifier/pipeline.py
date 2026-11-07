@@ -417,8 +417,15 @@ def count_decision(block, layer, detail):
     return shown
 
 
+def skip_stage_4(pr_key, region):
+    # With the model turned off a region that reaches Stage 4 gets no record
+    # A later run with the model on the same output then classifies only these regions
+    STATS["stage_4_skipped"] += 1
+    print(f"{pr_key} {region.file_path} region {region.effective_index}: reached Stage 4, model is off")
+
+
 def process_region(pr_key, region_position, raw_region, outfile, calls_used_by_file,
-                   finished_keys):
+                   finished_keys, use_llm=True):
     region = Region.from_raw(pr_key, region_position, raw_region)
     if region.key in finished_keys:
         return
@@ -428,12 +435,16 @@ def process_region(pr_key, region_position, raw_region, outfile, calls_used_by_f
     # Only model calls count toward the cap, so patterns and the ast gate
     # still run on a file that has already used up its share
     file_key = (pr_key, region.file_path)
-    allow_llm = calls_used_by_file[file_key] < PER_FILE_API_CALL_CAP
+    allow_llm = use_llm and calls_used_by_file[file_key] < PER_FILE_API_CALL_CAP
 
     result, layer, detail = classify_region(
         region.file_path, region.ours_text, region.theirs_text, region.base_text,
         raw_region, allow_llm,
     )
+
+    if result is None and not use_llm:
+        skip_stage_4(pr_key, region)
+        return
 
     STATS["total"] += 1
     if result is None:
@@ -483,7 +494,7 @@ def reason_to_stop(max_calls):
     return None
 
 
-def process_input(infile, outfile, calls_used_by_file, finished_keys, max_calls):
+def process_input(infile, outfile, calls_used_by_file, finished_keys, max_calls, use_llm=True):
     # Returns why the run stopped early, or None when every region was reached
     for line in infile:
         line = line.strip()
@@ -500,14 +511,15 @@ def process_input(infile, outfile, calls_used_by_file, finished_keys, max_calls)
             if stop:
                 return stop
             process_region(pr_key, region_position, region, outfile,
-                           calls_used_by_file, finished_keys)
+                           calls_used_by_file, finished_keys, use_llm)
     return None
 
 
-def run_one(input_path, output_path, rerun=False, retry_errors=False, max_calls=None):
+def run_one(input_path, output_path, rerun=False, retry_errors=False, max_calls=None, use_llm=True):
     # A normal run skips finished keys so it can resume after stopping
     # An llm-error counts as finished unless this is a retry run for those errors
     # A rerun processes every key in the input and overwrites only those keys
+    # With use_llm off Stage 4 is skipped by choice and those regions get no record
     reset_stats()
     compact_output(output_path)
     records = {} if rerun else read_records(output_path)
@@ -522,7 +534,7 @@ def run_one(input_path, output_path, rerun=False, retry_errors=False, max_calls=
 
     with open(input_path, "r", encoding="utf-8") as infile, \
             open(output_path, "a", encoding="utf-8") as outfile:
-        stop = process_input(infile, outfile, calls_used_by_file, finished_keys, max_calls)
+        stop = process_input(infile, outfile, calls_used_by_file, finished_keys, max_calls, use_llm)
     compact_output(output_path)
     if stop:
         print(f"Stopped early, {stop}. Run the same command again to resume")

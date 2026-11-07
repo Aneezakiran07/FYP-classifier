@@ -19,7 +19,7 @@ Last updated: 2026-11-07. Update this file whenever a task changes state. `docs/
 | 6 | `capped`, `llm-error`, retries, temperature zero, truncation | Aneeza | Done |
 | 7 | Confirming test, joint use lines, confluent-interference as unknown | Aneeza | Done |
 | 7 | Changed names | Fatima | Not started, needs an agreed definition |
-| 8 | `--no-llm` and `scripts/run_funnel.py` | Fatima | Not started |
+| 8 | `--no-llm` and `scripts/run_funnel.py` | Fatima, Aneeza reviews | Done (D11). Funnel numbers on train and dev still to be run and recorded |
 | after 8 | `scripts/make_split.py` | Aneeza | Done |
 | after 8 | `scripts/evaluate.py` | Aneeza | Not started |
 

@@ -46,11 +46,25 @@ def main(argv=None):
                         help="Classify the llm-error regions again against one model and overwrite those records")
     parser.add_argument("--max-calls", type=int, default=None,
                         help="Stop the run after this many model calls, run the same command again to resume")
+    parser.add_argument("--no-llm", action="store_true",
+                        help="Run only the rule stages, regions that reach Stage 4 get no record and are counted")
     args = parser.parse_args(argv)
     if args.max_retries < 1:
         parser.error("--max-retries must be at least 1")
     if args.retry_errors and (args.models or args.rerun):
         parser.error("--retry-errors runs against one model and cannot be used with --models or --rerun")
+    if args.no_llm and (args.models or args.retry_errors or args.max_calls):
+        parser.error("--no-llm calls no model and cannot be used with --models, --retry-errors or --max-calls")
+    if args.no_llm and args.rerun:
+        # A region that reaches Stage 4 writes nothing, so an old model record for it would survive the rerun
+        parser.error("--no-llm cannot be used with --rerun, start from an empty output file instead")
+
+    if args.no_llm:
+        # No key is checked because no model is called
+        print("The model is off, Stage 4 is skipped by choice and nothing is capped")
+        run_one(args.input_path, args.output_path, use_llm=False)
+        print("Done")
+        return
 
     classify_llm.DELAY_BETWEEN_CALLS_SECONDS = args.delay
     classify_llm.MAX_CALL_ATTEMPTS = args.max_retries

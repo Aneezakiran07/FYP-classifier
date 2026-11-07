@@ -65,7 +65,7 @@ final_dataset.jsonl
 | `schema.py`, 23 labels, statuses, base states, input hash | Working |
 | `pipeline.py`, stage order, Stage 4 selection, records, resume, rerun, call ceiling | Working |
 | `cli.py`, `report.py` | Working |
-| `--no-llm` flag | **Missing** |
+| `--no-llm` flag | Working (D11). Regions that reach Stage 4 get no record, never `capped` |
 
 ### Scripts
 | Script | State |
@@ -73,7 +73,7 @@ final_dataset.jsonl
 | `make_split.py` | Working |
 | `make_smoke_input.py` | Working, picks random regions that reach the model from train or dev |
 | `build_few_shot.py` | Working, nothing to build from yet |
-| `run_funnel.py` | **Missing** |
+| `run_funnel.py` | Working (D11). Train and dev by default, the test split only with `--include-test` |
 | `evaluate.py` | **Missing** |
 
 ### Tests
@@ -208,7 +208,7 @@ Do these in order. Item 2 was the only one the LLM side was waiting on, and its 
 | 3 | `export-shape`, limited to an exported signature change inside the region with `needs_verification` set | Until then, those regions go to the model. |
 | 4 | Trace for Stages 0 to 3, and `run_stages_0_to_3` | Required by the design. Labels do not change. |
 | 5 | Changed names, with a definition agreed with Aneeza | The resolver reads this. |
-| 6 | `--no-llm` and `scripts/run_funnel.py` | Report numbers. `--no-llm` is not the same as `capped`. |
+| 6 | **Done (D11).** `--no-llm` and `scripts/run_funnel.py`. Still to do: run the funnel on train and dev and record the numbers | Report numbers. `--no-llm` is not the same as `capped`. |
 | 7 | Tune the rules on dev | After hand labels. |
 
 ### Aneeza

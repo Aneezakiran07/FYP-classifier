@@ -564,3 +564,42 @@ def test_provenance_records_the_real_model_and_not_the_alias(tmp_path, monkeypat
     cli.main(args)
     block = read_rows(tmp_path / "out.jsonl")[0]["classifier"]
     assert block["provenance"]["model_name"] == "hackclub/openai/gpt-6-luna"
+
+
+def never_call(model, system, user):
+    raise AssertionError("the model must not be called with --no-llm")
+
+
+def test_no_llm_writes_only_rule_records_and_calls_no_model(tmp_path, monkeypatch, capsys):
+    write_inputs(tmp_path)
+    install_fakes(monkeypatch)
+    monkeypatch.setattr(providers, "call_model", never_call)
+    # No key is needed because no model is called
+    monkeypatch.setattr(providers, "check_available", lambda m: (False, "no api key found"))
+    out = tmp_path / "out.jsonl"
+    cli.main([str(tmp_path / "in.jsonl"), str(out), "--no-llm"])
+    rows = read_rows(out)
+    assert [row["file_path"] for row in rows] == ["package-lock.json"]
+    assert rows[0]["classifier"]["source"] == "rule"
+    text = capsys.readouterr().out
+    assert "reached Stage 4 with the model off, no record written: 2" in text
+    assert "capped:" not in text
+
+
+def test_a_normal_run_after_no_llm_classifies_only_the_stage_4_regions(tmp_path, monkeypatch):
+    write_inputs(tmp_path)
+    install_fakes(monkeypatch)
+    out = tmp_path / "out.jsonl"
+    cli.main([str(tmp_path / "in.jsonl"), str(out), "--no-llm"])
+    rule_record = read_rows(out)[0]
+    cli.main([str(tmp_path / "in.jsonl"), str(out), "--model", "good", "--delay", "0"])
+    rows = read_rows(out)
+    assert len(rows) == 3 and rows[0] == rule_record
+    assert [row["classifier"]["source"] for row in rows] == ["rule", "model", "model"]
+
+
+@pytest.mark.parametrize("extra", [["--models", "good"], ["--retry-errors"], ["--max-calls", "5"], ["--rerun"]])
+def test_no_llm_refuses_options_that_need_a_model_or_mix_old_records(tmp_path, extra):
+    args = [str(tmp_path / "in.jsonl"), str(tmp_path / "out.jsonl"), "--no-llm"] + extra
+    with pytest.raises(SystemExit):
+        cli.main(args)

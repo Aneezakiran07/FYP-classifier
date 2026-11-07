@@ -159,7 +159,7 @@ src/classifier/
   cli.py  report.py  shared
   rules/             Fatima: ast_diff.py, ast_gate.py, patterns/, validators.py
   llm/               Aneeza: prompts.py, prompt_builder.py, providers.py, parsing.py, classify_llm.py, few_shot.json
-scripts/             build_few_shot.py, make_split.py, make_smoke_input.py, and later run_funnel.py, evaluate.py
+scripts/             build_few_shot.py, make_split.py, make_smoke_input.py, run_funnel.py, and later evaluate.py
 tests/rules  tests/llm  tests/test_pipeline.py  tests/test_schema.py  tests/test_make_split.py
 docs/                START_HERE.md, PROGRESS.md, TEAM_GUIDE.md, classifier_design_from_report.md, decisions.md
 data/  outputs/      data is mostly gitignored, outputs are never committed
@@ -175,7 +175,7 @@ Contract between the two sides (only `pipeline.py` calls them, signatures stay s
 | `rules.validate_logic_test(region, test_id, evidence)` | rules | True or False |
 
 ## 11. How to run, in this order
-1. Rules only funnel: `scripts/run_funnel.py` with `--no-llm`. Report how many regions each pattern and stage decides and how many reach Stage 4. `--no-llm` means Stage 4 is skipped by choice. It is not the same as `capped`.
+1. Rules only funnel: `scripts/run_funnel.py`, which runs the pipeline with the model off, the same as `--no-llm`. Report how many regions each pattern and stage decides and how many reach Stage 4. `--no-llm` means Stage 4 is skipped by choice. It is not the same as `capped`. Those regions get no record, so a later normal run on the same output classifies only them (D11).
 2. Smoke test: about 100 rows, one cheap model, a max retries limit.
 3. Full run only after steps 1 and 2 are reviewed. Start from an empty output file. It resumes if it stops.
 4. Evaluate with `scripts/evaluate.py` on dev labels while tuning. Test labels only for the final numbers.

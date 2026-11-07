@@ -18,7 +18,7 @@ def reset_stats():
         "total": 0, "deterministic": 0, "by_pattern": {}, "ast": 0, "by_equivalence": {},
         "llm": 0, "prompt_a": 0, "prompt_b": 0, "a_structural": 0, "a_unknown": 0,
         "needs_verification": 0, "capped": 0, "llm_error": 0, "model_calls": 0,
-        "consecutive_llm_errors": 0,
+        "consecutive_llm_errors": 0, "stage_4_skipped": 0,
     })
     RUN_LOG.clear()
 
@@ -48,6 +48,9 @@ def print_report():
         print(f"capped:               {s['capped']} ({pct(s['capped'])})")
     if s["llm_error"]:
         print(f"llm-error:            {s['llm_error']} ({pct(s['llm_error'])})")
+    if s["stage_4_skipped"]:
+        # These regions have no record so they are not part of the total above
+        print(f"reached Stage 4 with the model off, no record written: {s['stage_4_skipped']}")
 
 def load_ground_truth(labels_path):
     # Hand labels keyed the same way as the output records
