@@ -1,15 +1,13 @@
 # Builds the final text sent to the model from the prompt templates, the few shot examples and the region
-# load_few_shot reads few_shot.json and format_examples shows router examples for prompt A and per test examples for prompt B
-# build_system fills the examples into a prompt and system_prompt_hash hashes the result for provenance
-# build_user_message gives the file path, the base or a note that it is empty or missing, both sides and the AST evidence
+# load_few_shot reads few_shot.json and format_examples lays out the hand labeled examples, which only the logic prompt receives
+# build_system gives the router prompt no examples and the logic prompt its examples, and system_prompt_hash hashes the result for provenance
+# build_user_message and every example share one layout with the file path, the base or a note on why it is missing, both sides and the AST evidence
 
 import hashlib
 import json
 
-from classifier.llm.prompts import (
-    FEW_SHOT_PATH, LOGIC_TESTS, MAX_EXAMPLE_CHARS, PROMPT_A, PROMPT_B, STRUCTURAL_LABELS,
-)
-from classifier.schema import BASE_EMPTY, BASE_PRESENT, strip_family
+from classifier.llm.prompts import FEW_SHOT_PATH, LOGIC_TESTS, MAX_EXAMPLE_CHARS, PROMPT_A, PROMPT_B
+from classifier.schema import BASE_EMPTY, BASE_PRESENT, find_base_state, strip_family
 
 # Turns the prompt strings and the few shot json into the final system messages
 
@@ -32,32 +30,44 @@ def _clip(text):
     return text if len(text) <= MAX_EXAMPLE_CHARS else text[:MAX_EXAMPLE_CHARS] + "..."
 
 
+def base_block(base_state, base_text):
+    # Tells the model how to read the base, an empty base differs from a missing one
+    if base_state == BASE_PRESENT:
+        return f"BASE:\n{base_text}"
+    return EMPTY_BASE_NOTE if base_state == BASE_EMPTY else NO_BASE_NOTE
+
+
+def message_text(file_path, base, ours, theirs, evidence):
+    # One layout for the real message and for every example, so the model sees the same shape in both
+    return (f"File path: {file_path}\n\n{base}\n\n"
+            f"OURS:\n{ours}\n\nTHEIRS:\n{theirs}\n\n"
+            f"AST evidence:\n{json.dumps(evidence)}")
+
+
 def _show(ex, answer):
-    ast = json.dumps(ex.get("ast_equivalence", {}))
-    base = f"BASE: {_clip(ex['base'])}\n" if ex.get("base") else ""
-    return (f"File: {ex.get('file_path')}\n{base}OURS: {_clip(ex.get('ours'))}\nTHEIRS: {_clip(ex.get('theirs'))}\n"
-            f"AST: {ast}\nANSWER: {json.dumps(answer)}")
+    # Each side is shortened, but the base note is the same one a real message gets
+    base_text = ex.get("base")
+    base = base_block(find_base_state({"base_text": base_text}), _clip(base_text))
+    evidence = ex.get("ast_equivalence") or {"equivalence": "not_analyzed"}
+    body = message_text(ex.get("file_path"), base, _clip(ex.get("ours")), _clip(ex.get("theirs")), evidence)
+    return f"{body}\n\nANSWER: {json.dumps(answer)}"
 
 
-def format_examples(examples, prompt):
-    # The router learns the kind from every example
-    # The logic prompt only shows examples hand labeled in the per test format
+def format_examples(examples):
+    # Only examples hand labeled with all seven answers are shown, because the answers cannot be derived from a label
     blocks = []
     for ex in examples:
-        label, note = strip_family(ex.get("true_label")), ex.get("notes") or "matches the hand label"
-        if prompt == "A" and label in LOGIC_TESTS:
-            blocks.append(_show(ex, {"kind": "semantic", "reason": note}))
-        elif prompt == "A" and label in STRUCTURAL_LABELS:
-            blocks.append(_show(ex, {"kind": "structural", "reason": note}))
-        elif prompt == "B" and label in LOGIC_TESTS and ex.get("test_answers"):
-            blocks.append(_show(ex, {"tests": ex["test_answers"]}))
+        if strip_family(ex.get("true_label")) in LOGIC_TESTS and ex.get("test_answers"):
+            blocks.append(f"Example {len(blocks) + 1}:\n" + _show(ex, {"tests": ex["test_answers"]}))
     return "Examples from labeled data:\n\n" + "\n\n".join(blocks) if blocks else ""
 
 
 def build_system(prompt, examples=None):
-    text = PROMPT_A if prompt == "A" else PROMPT_B
+    # The router gets no examples, because the hand labels are nearly all logic labels and would teach it to always answer semantic
+    if prompt == "A":
+        return PROMPT_A.strip()
     examples = load_few_shot() if examples is None else examples
-    return text.replace("<<EXAMPLES>>", format_examples(examples, prompt)).strip()
+    return PROMPT_B.replace("<<EXAMPLES>>", format_examples(examples)).strip()
 
 
 def system_prompt_hash(prompt):
@@ -66,15 +76,10 @@ def system_prompt_hash(prompt):
 
 
 def describe_base(region):
-    # Tells the model how to read the base, an empty base differs from a missing one
-    if region.base_state == BASE_PRESENT:
-        return f"BASE:\n{region.base_text}"
-    return EMPTY_BASE_NOTE if region.base_state == BASE_EMPTY else NO_BASE_NOTE
+    return base_block(region.base_state, region.base_text)
 
 
 def build_user_message(region, eq=None):
     evidence = ({"equivalence": eq.equivalence, "renames": eq.renames, "changed_nodes": eq.changed_nodes}
                 if eq is not None else {"equivalence": "not_analyzed"})
-    return (f"File path: {region.file_path}\n\n{describe_base(region)}\n\n"
-            f"OURS:\n{region.ours_text}\n\nTHEIRS:\n{region.theirs_text}\n\n"
-            f"AST evidence:\n{json.dumps(evidence)}")
+    return message_text(region.file_path, describe_base(region), region.ours_text, region.theirs_text, evidence)

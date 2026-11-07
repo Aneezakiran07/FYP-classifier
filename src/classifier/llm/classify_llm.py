@@ -1,7 +1,7 @@
 # Sends Stage 4 questions to the model and returns parsed answers, the model never picks a label
 # route runs the router prompt A and run_logic_tests runs the seven logic tests prompt B
-# ask_model retries a badly shaped reply once with a stricter reminder and call_with_retry retries transport errors with capped backoff
-# Failures raise ModelCallFailed with a reason code such as transport-error or invalid-answer, and every call is counted in STATS
+# ask_model retries a badly shaped reply once with a stricter reminder, and call_with_retry retries only network errors, rate limits and server errors
+# Failures raise ModelCallFailed with a reason code such as transport-error, provider-rejected or unexpected-error, and every reply is counted in STATS
 
 # model calling for stage 4
 # owned by Aneeza
@@ -16,9 +16,9 @@ from classifier.llm.parsing import parse_kind_response, parse_logic_tests_respon
 from classifier.report import STATS
 
 
-# Model name can be overridden with an env var or the model flag
+# The default is the classify alias named in CLAUDE.md, an env var or the model flag overrides it
 DEFAULT_MODEL_NAME = os.environ.get(
-    "CLASSIFIER_MODEL", os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    "CLASSIFIER_MODEL", os.environ.get("GEMINI_MODEL", "hackclub-classify")
 )
 
 # These are set from the command line once the script starts, the functions
@@ -40,9 +40,14 @@ REASON_PROVIDER_REJECTED = "provider-rejected"
 REASON_TRANSPORT_ERROR = "transport-error"
 REASON_INVALID_ANSWER = "invalid-answer"
 REASON_TRUNCATED_OUTPUT = "truncated-output"
+REASON_UNEXPECTED_ERROR = "unexpected-error"
 
-# These answers from a provider cannot change by sending the same request again
-PERMANENT_STATUS_CODES = (400, 401, 403, 404)
+# Status codes that can pass on their own, every 5xx code counts too
+# These are the same codes the OpenAI and Anthropic sdks retry
+TRANSIENT_STATUS_CODES = (408, 409, 429)
+
+# Words in the class names of network errors across the provider sdks and httpx
+TRANSIENT_ERROR_WORDS = ("Timeout", "Connection", "Network", "Transport")
 
 # A cap on the backoff wait so it does not grow forever on a stuck request
 MAX_BACKOFF_SECONDS = 120
@@ -57,14 +62,34 @@ class ModelCallFailed(Exception):
         self.code = code
 
 
+def error_status(error):
+    # Most sdks keep the http status in status_code and the google sdk keeps it in code
+    # The OpenAI sdk also has a code field that holds text, so only a number counts
+    for name in ("status_code", "code"):
+        value = getattr(error, name, None)
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def is_transient(error):
+    # Only a network problem, a rate limit or a server error can pass by sending the same request again
+    status = error_status(error)
+    if status is not None:
+        return status in TRANSIENT_STATUS_CODES or 500 <= status <= 599
+    names = [cls.__name__ for cls in type(error).__mro__]
+    return any(word in name for name in names for word in TRANSIENT_ERROR_WORDS)
+
+
 def describe_error(error):
     # Names the error without its message because a provider message can echo a key
-    status = getattr(error, "status_code", None)
+    status = error_status(error)
     return type(error).__name__ if status is None else f"{type(error).__name__} status {status}"
 
 
 def call_with_retry(system_instruction, user_message):
-    # One request to the current model, only a passing transport error is retried
+    # One request to the current model, only an error that can pass on its own is retried
+    # An error with a status is the provider refusing, and an error with none is a bug or a reply the code did not expect
     # Only requests that got a reply count toward the call ceiling of the file
     attempt = 0
     while True:
@@ -79,8 +104,9 @@ def call_with_retry(system_instruction, user_message):
             raise ModelCallFailed(REASON_TRUNCATED_OUTPUT, str(e))
         except Exception as e:
             described = describe_error(e)
-            if getattr(e, "status_code", None) in PERMANENT_STATUS_CODES:
-                raise ModelCallFailed(REASON_PROVIDER_REJECTED, described)
+            if not is_transient(e):
+                code = REASON_PROVIDER_REJECTED if error_status(e) is not None else REASON_UNEXPECTED_ERROR
+                raise ModelCallFailed(code, described)
             attempt += 1
             if attempt >= MAX_CALL_ATTEMPTS:
                 raise ModelCallFailed(REASON_TRANSPORT_ERROR, f"gave up after {attempt} attempts, {described}")

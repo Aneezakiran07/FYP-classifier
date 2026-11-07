@@ -1,7 +1,7 @@
 # Holds the fixed prompt texts and settings for Stage 4
 # PROMPT_A is the router prompt that asks for structural, semantic or unknown with a short reason
 # PROMPT_B asks the model to answer all seven logic tests with evidence, without naming a final label
-# It also defines LOGIC_TESTS in Table 5.1 order, STRUCTURAL_LABELS, the few shot file path, the example length limit and the prompt versions
+# It also defines LOGIC_TESTS in Table 5.1 order, the few shot file path, the example length limit and the prompt versions
 
 import os
 
@@ -25,20 +25,7 @@ LOGIC_TESTS = (
     "business-logic-conflict",
 )
 
-# Labels shown to the router as the structural kind in few shot examples
-STRUCTURAL_LABELS = (
-    "same-change",
-    "one-side-change",
-    "whitespace-only",
-    "reorder-only",
-    "value-only-change",
-    "disjoint-edits",
-    "formatting",
-    "documentation",
-    "import-restructure",
-    "rename",
-)
-
+# The router prompt takes no few shot examples, see build_system in prompt_builder.py
 PROMPT_A = """You judge ONE merge conflict region. Answer with JSON only, no prose.
 You see the file path, the base version when it exists, both sides and parser evidence. The message says whether the base is present, empty or unavailable.
 The AST evidence comes from a parser, trust it over your own reading.
@@ -47,8 +34,7 @@ Pick the kind:
 - semantic: the sides behave or type-check differently (conditions, values, arguments, calls, added or removed statements, reordered statements or arguments, and any change to a declared type such as an annotation, a union member or an interface member, even though types are erased at runtime)
 - unknown: the evidence is not enough to tell
 Two sides editing the same lines is never a reason.
-Reply exactly: {"kind": "structural|semantic|unknown", "reason": "one short sentence"}
-<<EXAMPLES>>"""
+Reply exactly: {"kind": "structural|semantic|unknown", "reason": "one short sentence"}"""
 
 
 PROMPT_B = (

@@ -1,7 +1,7 @@
 # Tests for the llm side, covering prompts, parsing, prompt building, model calling and providers, all with fake replies
 # They check the seven tests keep Table 5.1 order, the logic prompt never asks for a label, and broken reply shapes are refused
-# They check the base notes, few shot loading and splitting by prompt, and that prompt hashes change when the examples change
-# They check retries, permanent rejections, rate limits, truncated output, temperature zero for each provider and token counting
+# They check the base notes, that only the logic prompt gets few shot examples in the real message layout, and that its hash follows them
+# They check which errors are retried, permanent rejections, truncated output, temperature zero for each provider and token counting
 
 import json
 from types import SimpleNamespace
@@ -129,17 +129,25 @@ EXAMPLES = [
 ]
 
 
-def test_examples_are_read_from_json_and_split_by_prompt(tmp_path):
+def test_examples_are_read_from_json_and_shown_only_to_the_logic_prompt(tmp_path):
     path = tmp_path / "shots.json"
     path.write_text(json.dumps(EXAMPLES))
     loaded = prompt_builder.load_few_shot(str(path))
     a = prompt_builder.build_system("A", loaded)
     b = prompt_builder.build_system("B", loaded)
-    assert '"kind": "semantic"' in a and '"kind": "structural"' in a
+    assert a == prompt_builder.build_system("A", [])
     assert '"test_id": "assignment-override", "met": true' in b
-    assert "BASE: x = 0" in b
+    assert "BASE:\nx = 0" in b
     assert "b.ts" not in b
     assert "<<EXAMPLES>>" not in a + b
+
+
+@pytest.mark.parametrize("base", ["x = 0", "", None])
+def test_an_example_is_laid_out_like_a_real_message(base):
+    # The example must show the same base note a real message gets, including for an empty or missing base
+    example = dict(EXAMPLES[0], base=base, ast_equivalence={"equivalence": "not_analyzed"})
+    real = prompt_builder.build_user_message(make_region(base=base, ours="x = 1", theirs="x = 2"))
+    assert real in prompt_builder.build_system("B", [example])
 
 
 def test_logic_prompt_skips_an_example_with_no_per_test_answers():
@@ -281,6 +289,63 @@ def test_a_rate_limit_is_retried(monkeypatch, quick):
     assert len(calls) == 2
 
 
+class FakeStatusError(Exception):
+    status_code = None
+
+
+def test_an_unexpected_error_is_not_retried(monkeypatch, quick):
+    # An error with no status that is not a network error is a bug or a reply the code did not expect
+    calls = []
+    monkeypatch.setattr(providers, "call_model", failing_call(calls, KeyError("sk-secret")))
+    with pytest.raises(classify_llm.ModelCallFailed) as failed:
+        route(make_region(), None)
+    assert failed.value.code == classify_llm.REASON_UNEXPECTED_ERROR
+    assert len(calls) == 1 and "sk-secret" not in str(failed.value)
+
+
+@pytest.mark.parametrize("status", [408, 409, 500, 503])
+def test_a_server_error_is_retried(monkeypatch, quick, status):
+    calls = []
+    error = FakeStatusError("busy")
+    error.status_code = status
+    monkeypatch.setattr(providers, "call_model", failing_call(calls, error))
+    monkeypatch.setattr(classify_llm, "MAX_CALL_ATTEMPTS", 2)
+    with pytest.raises(classify_llm.ModelCallFailed) as failed:
+        route(make_region(), None)
+    assert failed.value.code == classify_llm.REASON_TRANSPORT_ERROR and len(calls) == 2
+
+
+@pytest.mark.parametrize("status", [402, 422])
+def test_any_other_client_error_is_not_retried(monkeypatch, quick, status):
+    calls = []
+    error = FakeStatusError("refused")
+    error.status_code = status
+    monkeypatch.setattr(providers, "call_model", failing_call(calls, error))
+    with pytest.raises(classify_llm.ModelCallFailed) as failed:
+        route(make_region(), None)
+    assert failed.value.code == classify_llm.REASON_PROVIDER_REJECTED and len(calls) == 1
+
+
+@pytest.mark.parametrize("error", [ConnectionError("reset"), TimeoutError("slow")])
+def test_a_network_error_is_retried(monkeypatch, quick, error):
+    calls = []
+    monkeypatch.setattr(providers, "call_model", failing_call(calls, error))
+    monkeypatch.setattr(classify_llm, "MAX_CALL_ATTEMPTS", 2)
+    with pytest.raises(classify_llm.ModelCallFailed) as failed:
+        route(make_region(), None)
+    assert failed.value.code == classify_llm.REASON_TRANSPORT_ERROR and len(calls) == 2
+
+
+def test_a_status_in_code_counts_only_when_it_is_a_number():
+    # The google sdk keeps the status in code, and the OpenAI sdk keeps text there
+    google_style = Exception("x")
+    google_style.code = 503
+    openai_style = Exception("x")
+    openai_style.code = "rate_limit_exceeded"
+    assert classify_llm.is_transient(google_style)
+    assert classify_llm.error_status(openai_style) is None and not classify_llm.is_transient(openai_style)
+
+
 def test_truncated_output_is_not_retried_and_counts_as_a_call(monkeypatch, quick):
     calls = []
     monkeypatch.setattr(providers, "call_model", failing_call(calls, providers.TruncatedOutput("cut")))
@@ -344,7 +409,7 @@ def test_gemini_truncation_is_detected():
     assert not providers.gemini_was_truncated(SimpleNamespace(candidates=None))
 
 
-def test_prompt_hashes_change_with_few_shot_examples(tmp_path, monkeypatch):
+def test_only_the_logic_prompt_hash_changes_with_few_shot_examples(tmp_path, monkeypatch):
     empty = tmp_path / "empty.json"
     empty.write_text("[]")
     monkeypatch.setattr(prompt_builder.load_few_shot, "__defaults__", (str(empty),))
@@ -354,7 +419,7 @@ def test_prompt_hashes_change_with_few_shot_examples(tmp_path, monkeypatch):
     full = tmp_path / "full.json"
     full.write_text(json.dumps(EXAMPLES[:1]))
     monkeypatch.setattr(prompt_builder.load_few_shot, "__defaults__", (str(full),))
-    assert prompt_builder.system_prompt_hash("A") != router
+    assert prompt_builder.system_prompt_hash("A") == router
     assert prompt_builder.system_prompt_hash("B") != logic
 
 

@@ -448,7 +448,7 @@ def test_a_transport_outage_is_llm_error_and_never_capped(tmp_path, monkeypatch)
     args = regions_in_one_file(tmp_path, 3) + ["--max-retries", "2"]
     install_fakes(monkeypatch)
     monkeypatch.setattr(pipeline, "PER_FILE_API_CALL_CAP", 1)
-    monkeypatch.setattr(providers, "call_model", fail_with(RuntimeError("down")))
+    monkeypatch.setattr(providers, "call_model", fail_with(ConnectionError("down")))
     cli.main(args)
     blocks = [row["classifier"] for row in read_rows(tmp_path / "out.jsonl")]
     assert [b["reason"] for b in blocks] == ["transport-error"] * 3

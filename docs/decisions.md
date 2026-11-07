@@ -328,3 +328,51 @@ Population: `final_dataset.jsonl`, train and dev only, 3,502 pull requests, 30,3
 - `rename` decides 39 regions after the D9 guard.
 - No marker records: 584 one side deletions as `business-logic-conflict`, 477 `unknown`.
 - 11,880 of 30,355 is 39.1 percent. D6 counted 14,013 of 35,241 on the whole dataset, 39.8 percent, so train and dev look like the whole.
+
+## D12. Two label decisions from the first dev labels (2026-11-08)
+Made while labeling the first 30 dev regions in `data/labels/dev_labels.jsonl`. Those 30 labels were drafted by another assistant and stay drafts until Aneeza reviews each one herself. Both decisions are also agreed tie breaks in `.claude/skills/label-guidelines/SKILL.md`.
+
+### Decision 1: same change plus extra is unknown
+- **Case.** Both sides changed from base, and one side's result is the other side's result plus something extra.
+- **Why no label fits.** `same-change` needs identical edits, `one-side-change` needs only one side to change, and `disjoint-edits` needs edits to different parts.
+- **Decision.** Label it `unknown` with the reason "same change plus extra, no label defined". The taxonomy does not change.
+- **Applied to** dev regions 3, 4, 19 and 24. Region 19 has an empty base, so both sides are additions and the same reasoning holds.
+
+### Decision 2: value-only-change is broadened
+- **Old meaning** (Table 5.1): only an infrastructure literal differs.
+- **New meaning:** only a literal's text differs, and nothing else in the region differs.
+- **Condition rule:** if that text is used in a condition, or code compares against it, the region goes to the logic labels instead.
+- **Applied to** dev regions 8, 11 and 21 (log and UI text), which are now `value-only-change`. Region 5 is not `value-only-change`, because theirs also adds a color line, so something else differs. It is `overlap-contamination` (test 4: the sides compete over one member and differ in another), not `assignment-override` (test 5 needs the sides to differ in nothing else).
+
+### Not changed yet
+The old wording is still in the report extract, `CLAUDE.md`, the `ValueOnlyChange` rule and the logic prompt. Until they are updated, the rule only fires on infrastructure names. Regions like 8, 11 and 21 therefore still reach Stage 4, where the model cannot write `value-only-change` (Stage 4 writes only logic labels and confirmed structural labels). They will be scored as misses against these labels until the rule and the prompt follow this decision.
+
+## D13. Few shot builder, router examples and retries, from the code review (2026-11-08)
+Aneeza's area (`src/classifier/llm/` and `scripts/build_few_shot.py`). `tests/test_pipeline.py` and this file are shared, so Fatima should review the one test change and this entry.
+
+### Few shot builder
+- A label becomes an example only when all seven answers pass the parser that checks a model reply, its first met test is its label, and no quoted evidence falls outside the 500 characters of each side the prompt shows. Before, the first two labels per test were taken even with empty answers, which would have shown `"met": null` to the model.
+- The AST verdict in an example is the one after the guards, the same one the model sees in a run. Before, dev region 15 would have shown `identifier_rename_only` instead of `content_changed`.
+- Several label files can be given and are read in order, so label batches can be built together.
+
+### Router prompt
+- The router prompt gets no few shot examples. The builder only collects logic labels, so every router example would have been `semantic`, and the router already answered `semantic` for 95 of 100 smoke regions. Router examples can come back as a balanced set once structural regions that reach Stage 4 are hand labeled.
+- `STRUCTURAL_LABELS` is removed from `prompts.py`. It was used only for router examples, and it listed `value-only-change`, `one-side-change` and `disjoint-edits` as structural, which the router prompt itself calls semantic.
+- The final router text is byte identical (hash starting `0c6070dc`), so `ROUTER_PROMPT_VERSION` stays `router-v1`.
+
+### Example layout
+- An example uses the same layout as a real message: `File path`, the base or the same empty or missing base note, `OURS`, `THEIRS`, `AST evidence`, then `ANSWER`. Examples are numbered. Before, an empty or missing base was left out of the example, and 30 percent of the dev regions that reach the model have an empty base.
+- `few_shot.json` is still empty, so the logic prompt text is unchanged today (hash starting `ea07a164`) and `LOGIC_PROMPT_VERSION` stays `logic-v1`. The prompt hash records the examples once they exist.
+
+### Retries, changes part of D6
+- Only an error that can pass on its own is retried: a network error (its class name says timeout, connection, network or transport), or status 408, 409, 429 or any 5xx. These are the codes the OpenAI and Anthropic SDKs retry. The status is read from `status_code`, or from `code` when it holds a number, which covers the google SDK.
+- Any other status is `provider-rejected` at once. D6 listed only 400, 401, 403 and 404, so a 402 from an empty budget used to take five attempts.
+- An error with no status that is not a network error gets the new reason code `unexpected-error` at once. It means a bug or a reply the code did not expect. Before, it took five attempts and about 60 seconds of waiting and was recorded as `transport-error`. The D6 list of `llm-error` reason codes gains `unexpected-error`.
+
+### Default model
+- With no `--model` and no `CLASSIFIER_MODEL` or `GEMINI_MODEL` variable, the model is `hackclub-classify`, the classify alias in `CLAUDE.md` section 9. It was `gemini-3.5-flash-lite`.
+
+### Tests
+- `tests/llm/test_prompts.py`: two tests now expect no router examples and the new layout, and are renamed to say so. New tests cover the example layout and which errors are retried.
+- `tests/test_pipeline.py`: the transport outage test raises `ConnectionError` instead of `RuntimeError`, because a plain `RuntimeError` is now an unexpected error, not a transport error.
+- New file `tests/test_build_few_shot.py` with seven tests for the builder.
