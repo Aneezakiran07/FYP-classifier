@@ -24,9 +24,18 @@ def write_inputs(tmp_path):
     (tmp_path / "sample_labels.jsonl").write_text("\n".join(json.dumps(x) for x in labels) + "\n")
 
 
-def logic_reply(met=()):
-    return json.dumps({"tests": [{"test_id": test_id, "met": test_id in met, "evidence": "quoted"}
+# The evidence quotes the default region in the same form the real model uses
+REAL_EVIDENCE = "`OURS: x = 1`"
+
+
+def logic_reply(met=(), evidence=REAL_EVIDENCE):
+    return json.dumps({"tests": [{"test_id": test_id, "met": test_id in met, "evidence": evidence}
                                  for test_id in prompts.LOGIC_TESTS]})
+
+
+def first_ours_line(user):
+    # The first line of our side as the prompt shows it to the model
+    return user.split("OURS:\n", 1)[1].splitlines()[0]
 
 
 def install_fakes(monkeypatch):
@@ -40,7 +49,7 @@ def install_fakes(monkeypatch):
             return json.dumps({"kind": "semantic", "reason": "value differs"})
         if model == "good":
             test_id = "assignment-override" if "src/one.ts" in user else "business-logic-conflict"
-            return logic_reply(met=[test_id])
+            return logic_reply(met=[test_id], evidence=f"`OURS: {first_ours_line(user)}`")
         return logic_reply()
     monkeypatch.setattr(providers, "call_model", call)
 
@@ -220,17 +229,23 @@ def trace_results(block):
     return {entry["test"]: entry["result"] for entry in block["trace"]}
 
 
+# One side guards the call and the other does not, so the control flow check holds
+CONTROL_FLOW_REGION = {"ours_text": "if (ready) {\n  start()\n}", "theirs_text": "start()"}
+CONTROL_FLOW_EVIDENCE = "`OURS: if (ready) {`"
+
+
 def test_the_pipeline_selects_the_first_met_test(tmp_path, monkeypatch):
-    reply = logic_reply(met=["execution-perturbation", "assignment-override", "business-logic-conflict"])
-    block = one_region_block(tmp_path, monkeypatch, semantic_then(reply))
+    reply = logic_reply(met=["execution-perturbation", "assignment-override", "business-logic-conflict"],
+                        evidence=CONTROL_FLOW_EVIDENCE)
+    block = one_region_block(tmp_path, monkeypatch, semantic_then(reply), CONTROL_FLOW_REGION)
     assert block["label"] == "execution-perturbation"
     assert (block["stage"], block["source"], block["status"]) == (4, "model", "classified")
-    assert block["evidence"] == "quoted" and block["reason"] == "value differs"
+    assert block["evidence"] == CONTROL_FLOW_EVIDENCE and block["reason"] == "value differs"
 
 
-def test_the_trace_shows_every_test_and_the_skipped_validator(tmp_path, monkeypatch):
-    reply = logic_reply(met=["execution-perturbation", "assignment-override"])
-    block = one_region_block(tmp_path, monkeypatch, semantic_then(reply))
+def test_the_trace_shows_every_test_and_the_validator(tmp_path, monkeypatch):
+    reply = logic_reply(met=["execution-perturbation", "assignment-override"], evidence=CONTROL_FLOW_EVIDENCE)
+    block = one_region_block(tmp_path, monkeypatch, semantic_then(reply), CONTROL_FLOW_REGION)
     assert trace_results(block) == {
         "router": "passed",
         "null-safety-conflict": "failed",
@@ -240,18 +255,42 @@ def test_the_trace_shows_every_test_and_the_skipped_validator(tmp_path, monkeypa
         "assignment-override": "skipped",
         "confluent-interference": "skipped",
         "business-logic-conflict": "skipped",
-        "validator": "skipped",
+        "validator": "passed",
     }
     # A later test the model marked as met keeps its answer in the trace
     later = [entry for entry in block["trace"] if entry["test"] == "assignment-override"][0]
-    assert later["met"] is True and later["evidence"] == "quoted"
+    assert later["met"] is True and later["evidence"] == CONTROL_FLOW_EVIDENCE
+    assert block["trace"][-1]["test_id"] == "execution-perturbation"
     assert all(entry["reason"] for entry in block["trace"])
 
 
-def test_a_label_stays_flagged_while_the_validator_is_not_built(tmp_path, monkeypatch):
+def test_a_confirmed_label_stays_flagged_for_verification(tmp_path, monkeypatch):
     block = one_region_block(tmp_path, monkeypatch, semantic_then(logic_reply(met=["assignment-override"])))
-    assert block["needs_verification"] is True
-    assert block["trace"][-1]["reason"] == pipeline.VALIDATOR_NOT_BUILT
+    assert block["label"] == "assignment-override"
+    assert block["needs_verification"] is True and block["verification_priority"] == "normal"
+    assert block["trace"][-1]["test"] == "validator" and block["trace"][-1]["result"] == "passed"
+
+
+def test_evidence_that_is_not_in_the_region_fails_the_validator(tmp_path, monkeypatch):
+    reply = logic_reply(met=["assignment-override"], evidence="`OURS: y = 7`")
+    block = one_region_block(tmp_path, monkeypatch, semantic_then(reply))
+    assert block["label"] == "unknown" and block["unknown_reason"] == pipeline.VALIDATOR_FAILED
+    assert block["reason"] and block["status"] == "classified"
+    assert (block["stage"], block["source"]) == (4, "model")
+    assert block["needs_verification"] is True and block["verification_priority"] == "high"
+    assert block["confirming_test"] is None
+    assert trace_results(block)["validator"] == "failed"
+    assert block["trace"][-1]["reason"] == pipeline.VALIDATOR_FAILED
+
+
+def test_a_test_check_that_fails_on_the_region_fails_the_validator(tmp_path, monkeypatch):
+    # The evidence is real but the region has no control flow change
+    reply = logic_reply(met=["execution-perturbation", "assignment-override"])
+    block = one_region_block(tmp_path, monkeypatch, semantic_then(reply))
+    assert block["label"] == "unknown" and block["unknown_reason"] == pipeline.VALIDATOR_FAILED
+    # A later met test does not take over after the validator fails
+    assert trace_results(block)["assignment-override"] == "skipped"
+    assert block["trace"][-1]["test_id"] == "execution-perturbation"
 
 
 def test_no_test_met_is_unknown_with_a_reason(tmp_path, monkeypatch):
@@ -272,6 +311,31 @@ def test_a_structural_hint_is_never_a_label_and_skips_the_logic_prompt(tmp_path,
     assert block["label"] == "unknown" and block["unknown_reason"] == "ambiguous"
     assert block["candidate_labels"] is None
     assert block["provenance"]["logic_prompt_hash"] is None
+    assert trace_results(block)["confirm-structural"] == "failed"
+    assert block["trace"][-1]["reason"] == pipeline.STRUCTURAL_NOT_CONFIRMED
+
+
+def structural_reply(model, system, user):
+    return json.dumps({"kind": "structural", "reason": "moved"})
+
+
+def test_a_structural_hint_confirmed_by_a_rule_is_a_model_label(tmp_path, monkeypatch):
+    # The rule answers with the old family prefix and the pipeline writes the bare name
+    monkeypatch.setattr(pipeline, "confirm_structural", lambda region, verdict: "structural/rename")
+    block = one_region_block(tmp_path, monkeypatch, structural_reply)
+    assert block["label"] == "rename" and block["reason"] == "moved"
+    assert (block["stage"], block["source"], block["status"]) == (4, "model", "classified")
+    assert block["confirming_test"] == "confirm-structural"
+    assert block["needs_verification"] is True and block["verification_priority"] == "normal"
+    assert trace_results(block)["confirm-structural"] == "passed"
+    assert block["trace"][-1]["label"] == "rename"
+    assert block["provenance"]["logic_prompt_hash"] is None
+
+
+def test_a_rule_that_confirms_a_hint_with_a_logic_label_stops_the_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline, "confirm_structural", lambda region, verdict: "assignment-override")
+    with pytest.raises(ValueError):
+        one_region_block(tmp_path, monkeypatch, structural_reply)
 
 
 def test_a_router_unknown_keeps_the_reason_of_the_model(tmp_path, monkeypatch):

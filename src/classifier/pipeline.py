@@ -15,6 +15,7 @@ from classifier.llm import classify_llm, prompt_builder, prompts, providers, rou
 from classifier.report import RUN_LOG, STATS, print_report, reset_stats
 from classifier.rules.ast_gate import GATE_LABELS, apply_guards
 from classifier.rules.patterns import ClassifyInput, classify_before_gate, classify_boundary_stage
+from classifier.rules.validators import confirm_structural, validate_logic_test
 from classifier.schema import (
     Region,
     Result,
@@ -68,8 +69,14 @@ IDENTITY_STAGE = 1
 AST_GATE_STAGE = 2
 LLM_STAGE = 4
 
-# The reason recorded while the checks of step 5 do not exist
-VALIDATOR_NOT_BUILT = "validator-not-built"
+# The reason recorded when the validator does not confirm the selected test
+VALIDATOR_FAILED = "validator-failed"
+
+# The reason recorded when no rule confirms a structural hint of the model
+STRUCTURAL_NOT_CONFIRMED = "structural-not-confirmed"
+
+# The only labels a confirmed structural hint can give at Stage 4
+STRUCTURAL_LABELS = ("formatting", "documentation", "import-restructure", "rename")
 
 # This many failures in a row means the model or the budget is gone, so the run stops
 # and the regions it has not reached stay unwritten for a later resume
@@ -274,9 +281,9 @@ def logic_test_entries(answers, selected):
     return entries
 
 
-def select_logic_label(routed, answers, trace):
+def select_logic_label(stage_region, routed, answers, trace):
     # The pipeline picks the first met test and the model never names the label
-    # The label stays flagged until the validators of step 5 can confirm it
+    # A rule then checks the evidence and the region before the label is written
     selected = next((answer for answer in answers if answer.met), None)
     trace.extend(logic_test_entries(answers, selected))
     if selected is None:
@@ -285,10 +292,34 @@ def select_logic_label(routed, answers, trace):
         # The joint use cannot be checked without lines around the region
         trace.append(trace_entry("context-lines", "failed", NO_CONTEXT_REASON))
         return unknown_from_model("the joint use cannot be checked without context lines", NO_CONTEXT_REASON)
-    trace.append(trace_entry("validator", "skipped", VALIDATOR_NOT_BUILT))
+    if not validate_logic_test(stage_region, selected.test_id, selected.evidence):
+        # A later met test does not take over because the first met test is the answer
+        trace.append(trace_entry("validator", "failed", VALIDATOR_FAILED, test_id=selected.test_id))
+        return unknown_from_model("the validator did not confirm the selected test", VALIDATOR_FAILED)
+    trace.append(trace_entry("validator", "passed", "the evidence and the test check held",
+                             test_id=selected.test_id))
+    # The validator is a cheap text check so a person still reviews the label
     return {
         "label": selected.test_id, "reason": routed["reason"], "evidence": selected.evidence,
         "confirming_test": selected.test_id,
+        "needs_verification": True, "verification_priority": "normal",
+    }
+
+
+def confirm_structural_hint(stage_region, eq, routed, trace):
+    # A structural hint of the model becomes a label only when a rule confirms it
+    # The label counts as a model decision because the rule only ran after the hint
+    confirmed = confirm_structural(stage_region, eq)
+    if confirmed is None:
+        trace.append(trace_entry("confirm-structural", "failed", STRUCTURAL_NOT_CONFIRMED))
+        return unknown_from_model("the model hinted structural and no check confirmed it", "ambiguous")
+    label = strip_family(confirmed)
+    if label not in STRUCTURAL_LABELS:
+        # A rule that confirms a structural hint with another label is a bug in the rule
+        raise ValueError(f"confirm_structural returned {confirmed!r}, which is not a structural label")
+    trace.append(trace_entry("confirm-structural", "passed", "a rule confirmed the structural hint", label=label))
+    return {
+        "label": label, "reason": routed["reason"], "confirming_test": "confirm-structural",
         "needs_verification": True, "verification_priority": "normal",
     }
 
@@ -297,12 +328,10 @@ def run_stage_4(stage_region, eq, trace):
     routed = route(stage_region, eq)
     trace.append(trace_entry("router", "passed", routed["reason"], answer=routed["kind"]))
     if routed["kind"] == "structural":
-        # A hint becomes a label only after a check confirms it, and step 5 builds that check
-        trace.append(trace_entry("confirm-structural", "skipped", VALIDATOR_NOT_BUILT))
-        return unknown_from_model("the model hinted structural and no check confirmed it", "ambiguous")
+        return confirm_structural_hint(stage_region, eq, routed, trace)
     if routed["kind"] == "unknown":
         return unknown_from_model(routed["reason"], "router-unknown")
-    return select_logic_label(routed, run_logic_tests(stage_region, eq), trace)
+    return select_logic_label(stage_region, routed, run_logic_tests(stage_region, eq), trace)
 
 
 def classify_with_llm(file_path, ours_text, theirs_text, eq, region):

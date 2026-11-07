@@ -9,7 +9,7 @@ Read this first. Then read `CLAUDE.md` (the design and the rules) and `docs/deci
 **The whole classifier runs end to end, including a real model, but its labels are not trustworthy yet.**
 
 Two things are missing before we can trust them:
-1. **Validators.** Nothing checks the model's answer yet, so every model label is flagged `needs_verification`.
+1. **Validators.** Done for logic labels on 2026-11-07 (D10). A model label whose evidence or check fails is now `unknown` with `validator-failed`. Every model label is still flagged `needs_verification`, and `confirm_structural` has no checks yet.
 2. **Hand labels.** We have none, so no accuracy number exists for the rules or for the model.
 
 Do not start a full run until both exist and the prompts have been tuned.
@@ -30,7 +30,7 @@ final_dataset.jsonl
    |
    Stage 4   only what is left: router prompt, then 7 logic tests prompt
    |           The model answers tests. The pipeline picks the first met test.
-   |           A validator confirms it (not built yet).
+   |           A validator confirms it, or the region is unknown.
    Stage 5   one record per region in a JSON Lines file
 ```
 
@@ -44,7 +44,7 @@ final_dataset.jsonl
 | `patterns/`, 14 patterns in stage order | Working |
 | Rename guard | Working, our own choice, and probably strict (see section 7) |
 | `export-shape` | **Missing** |
-| `validators.py` (`validate_logic_test`, `confirm_structural`) | **Missing** |
+| `validators.py` (`validate_logic_test`, `confirm_structural`) | `validate_logic_test` working and wired (D10). `confirm_structural` wired, always returns None |
 | `run_stages_0_to_3` | **Missing.** `pipeline.py` calls the patterns and the gate directly for now. |
 | Trace for Stages 0 to 3 | **Missing.** Only Stage 4 writes a trace. |
 | Changed names | **Missing**, needs an agreed definition |
@@ -199,12 +199,12 @@ Money: 3 dollars per day on Hack Club. Dry run, row count and cost estimate befo
 
 ### Fatima
 
-Do these in order. Item 2 is the only one the LLM side is waiting on.
+Do these in order. Item 2 was the only one the LLM side was waiting on, and its logic part is done.
 
 | # | Task | Why it matters |
 |---|---|---|
 | 1 | **Check the rule changes made for you** (section 7). Change anything you disagree with. | You own these, and they were merged without your review. |
-| 2 | **Propose and build the validators**: `validate_logic_test(region, test_id, evidence)` and `confirm_structural(region, ast_verdict)`. Agree the checks with Aneeza first. | **Needed before any full run.** `test_id` is the label name, such as `assignment-override`. The evidence format is in section 4: tokens in backticks. Requiring every token to match would reject about 1 in 5 labeled regions from the smoke test, so look at those misses before choosing. |
+| 2 | **Done for logic labels (D10).** `validate_logic_test` is built and wired. Still to do: the checks inside `confirm_structural(region, ast_verdict)`, which is wired and returns None for now. | A structural hint stays `unknown` with `ambiguous` until those checks exist. `pipeline.py` needs no change when they land. |
 | 3 | `export-shape`, limited to an exported signature change inside the region with `needs_verification` set | Until then, those regions go to the model. |
 | 4 | Trace for Stages 0 to 3, and `run_stages_0_to_3` | Required by the design. Labels do not change. |
 | 5 | Changed names, with a definition agreed with Aneeza | The resolver reads this. |
@@ -216,7 +216,7 @@ Do these in order. Item 2 is the only one the LLM side is waiting on.
 | # | Task | Why it matters |
 |---|---|---|
 | 1 | Write `scripts/evaluate.py`: accuracy, per label precision and recall, confusion matrix, rules and LLM separately, plus counts of unknown, capped and llm-error | Nothing can be scored without it. |
-| 2 | Agree the validator checks with Fatima | Fatima proposes, Aneeza agrees. |
+| 2 | Review D10: the validator checks, `validator-failed` in `unknown_reason`, and source `model` for a confirmed structural hint | Fatima built these without waiting. Change anything you disagree with and record it in `docs/decisions.md`. |
 | 3 | Decide whether a taxonomy document exists, or remove the "taxonomy rules 1 to 16" comments | Cleanup. |
 | 4 | Build `few_shot.json` from hand labels, with the seven per test answers on each logic example | The logic prompt skips any example without them. Never invent examples. |
 | 5 | Tune the prompts on dev, starting with `no-test-met` | Bump the prompt version on every change. |
@@ -264,8 +264,8 @@ These went into `rules/`, `tests/rules/` and shared files without Fatima's revie
 
 ## 8. Known limits
 
-- **No validators.** Every model label is unconfirmed.
-- **A structural hint never gets a label yet.** It is `unknown` with reason `ambiguous` until `confirm_structural` exists.
+- **Validators are cheap text checks.** They reject made up evidence, but a passed label is still not proven right (D10).
+- **A structural hint never gets a label yet.** It is `unknown` with reason `ambiguous` until `confirm_structural` has checks. The pipeline side is wired already.
 - `DisjointEdits` cannot check for a joint use outside the region, because the data has no surrounding lines.
 - `confluent-interference` is recorded as `unknown` for the same reason.
 - The call ceiling of 50 per file is our choice. A region that starts below it finishes, so a file can pass it slightly. If every region in a file uses two calls, this caps 103 regions in 8 files.

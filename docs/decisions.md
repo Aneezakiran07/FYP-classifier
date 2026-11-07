@@ -232,3 +232,53 @@ Reproduce with `python scripts/review_rename_guard.py` and `python scripts/compa
 ### Open
 - Should a rename plus a comment change still be `rename`? The report says "consistent identifier rename, nothing else".
 - Where did the "clarification document" in the old comment come from? It is not in the report extract.
+## D10. Validators and their wiring into Stage 4 (2026-11-07)
+
+Fatima built `rules/validators.py` and wired it into `pipeline.py`. Aneeza said to go ahead and review afterwards, so every choice below was made without waiting for her. Aneeza can still change any of it, the same way D8 worked the other way round. `pipeline.py` and `tests/test_pipeline.py` are shared. Nothing in `llm/` or `tests/llm/` changed.
+
+### What `validate_logic_test(region, test_id, evidence)` checks
+Two checks, and both must pass.
+
+1. **The evidence is real.** The evidence must hold at least one quoted piece. Backticks are read first, and double quoted text of three or more characters only when there are no backticks. A leading `OURS:`, `THEIRS:` or `BASE:` is removed. Every piece must appear in the ours, theirs or base text once all whitespace is removed. A parser change name such as `call_added` is accepted, because it comes from the AST summary and not from the region text.
+2. **A cheap check for the selected test holds on the region.**
+
+| Test | Check |
+|---|---|
+| null-safety-conflict | The two sides have a different count of `null`, `undefined`, `?.`, `??` or `!.` |
+| type-incompatibility | The set of signature lines differs (function, arrow, interface, type alias, return type) |
+| execution-perturbation | The control flow lines differ in order or content (`if`, `return`, `throw`, loops, `try` and similar), with comments ignored |
+| overlap-contamination | Both sides changed lines against the base and those lines share an identifier that is not a keyword |
+| assignment-override | The same target is given different values on the two sides |
+| confluent-interference | Always fails, because there are no context lines to show a joint use |
+| business-logic-conflict | The two sides differ once whitespace is removed |
+
+An unknown test id fails. On the 67 smoke records with a met test, 60 pass both checks (`scripts/measure_validators.py`, train and dev only). The checks are deliberately cheap. They catch evidence the model made up and answers that cannot be true for the region. They do not prove the label is right.
+
+### Wiring of the logic tests
+- After the pipeline picks the first met test, it calls `validate_logic_test` with the Stage 4 region, which includes the base.
+- A pass writes the label as before. The trace gets a `validator` entry of `passed` with the test id.
+- A fail gives `unknown` with `unknown_reason` `validator-failed`, priority `high` and no confirming test. The trace gets a `validator` entry of `failed`, reason `validator-failed` and the test id.
+- A later met test does not take over after a fail. The first met test is the answer of the model, and a fail means that answer is not supported. This matches how `confluent-interference` already works.
+- `confluent-interference` still becomes `unknown` with `no-context-lines` before the validator runs.
+
+### Decided without waiting, with the reason
+- **Where the code `validator-failed` goes.** In `unknown_reason`, with a plain sentence in `reason`. This is the convention `no-test-met`, `ambiguous` and `router-unknown` already use, so `evaluate.py` can count every unknown cause from one field.
+- **`needs_verification` stays true for every model label, also after a pass.** The validators are text checks, so a person still reviews. The priority tells them apart: `normal` after a pass, `high` for an unknown.
+- **Source of a structural label confirmed by a rule after the hint of the model: `model`.** This was open since D3, and Aneeza had proposed `model`. The rule only runs because the model hinted, so the decision belongs to Stage 4 and counts in the LLM part of the evaluation. Stage is 4 and the provenance carries the model name and router prompt hash. `confirming_test` is `confirm-structural`, so the evaluation can still pick these regions out.
+
+### Wiring of `confirm_structural`
+- On a structural hint, the pipeline calls `confirm_structural(region, ast_verdict)`.
+- None gives `unknown` with `ambiguous`, as before. The trace entry is now `confirm-structural` `failed` with reason `structural-not-confirmed`, where it used to be `skipped` with `validator-not-built`. The constant `VALIDATOR_NOT_BUILT` is gone because nothing uses it now.
+- A label is written with the bare name, so `structural/rename` becomes `rename`. Only `formatting`, `documentation`, `import-restructure` and `rename` are allowed. Any other label is a bug in the rule and stops the run with an error, so it cannot be written silently.
+- **`confirm_structural` still returns None for every region**, so in practice every structural hint is still `unknown` with `ambiguous`. When Fatima builds the checks, nothing in `pipeline.py` has to change.
+
+### Test changes in `tests/test_pipeline.py`
+- The fake model used the evidence `"quoted"`, which is in no region, so the validator rejected it. The fake now quotes region text the way the real model does, such as `` `OURS: x = 1` ``.
+- The two selection tests used `execution-perturbation` on `x = 1` against `x = 2`, which has no control flow change. They now use a region where one side guards a call with `if`, so they still check that the first met test wins.
+- The validator trace entry is now expected to be `passed`. The test for an unbuilt validator became a test that a confirmed label stays flagged.
+- New tests: evidence not in the region fails, a failing test check fails, a structural hint confirmed by a rule becomes a `model` label, and a rule that confirms a hint with a logic label stops the run. The structural hint test also checks the new trace reason.
+
+### For Aneeza to look at
+- The table of checks above, mainly whether any check is too strict for real answers. The 7 smoke records that fail are listed by `scripts/measure_validators.py`.
+- The `model` source for a confirmed structural label.
+- Nothing else waits on her. Fatima continues with `confirm_structural` checks, the Stage 0 to 3 trace, `export-shape` and `--no-llm`.

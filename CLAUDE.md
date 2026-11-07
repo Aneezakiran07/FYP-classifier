@@ -187,8 +187,9 @@ Phase 2 build order: (1) classifier block and `schema.py`, (2) stage order with 
 Record each answer in `docs/decisions.md` when it is made. Entries D3 to D8 hold the answers so far, including status values, Stage 0 lists, no-marker regions, no test met, the removed confidence answers, the call ceiling and retries.
 Still open:
 - What exactly counts as a changed name.
-- Which checks the deterministic validators run (Fatima proposes, Aneeza agrees).
-- Source value for a structural label confirmed by a rule after the model's hint (proposed `model`, needs a final answer when `confirm_structural` is built).
+- Which checks `confirm_structural` runs (Fatima proposes).
+
+Decided in D10, Aneeza to review: the checks of `validate_logic_test`, and the source `model` for a structural label confirmed by a rule after the model's hint.
 
 ## 13. Devlogs
 When the user asks for a devlog, use this exact format and nothing else:
