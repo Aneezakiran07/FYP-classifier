@@ -7,6 +7,7 @@ The classifier assigns one of 23 labels to every merge conflict region. Stages 0
 ## 0. Rules you always follow
 - Never read, print, copy or commit `.env`. Use `.env.example` as the template.
 - Do not set `ANTHROPIC_API_KEY` in the shell that runs Claude Code.
+- Git ignored data is not shared through git, so each person has their own copy of `data/raw/`, `data/splits/`, `outputs/` and `data.zip`. Before anything writes, regenerates, moves or deletes a file there, stop and raise a flag to the user: name the file and say the other person will not get the change through git. After the change, tell the user to send the new file to the other person and to compare `Get-FileHash` on both machines, so both work on identical data. A script that only reads these files needs no flag. This does not cover `.env`, which holds each person's own keys and is never shared, or the local caches (`__pycache__/`, `.pytest_cache/`, `.venv/`, `*.egg-info/`, `.refactor_project_marker`), which each machine builds for itself.
 - The report design wins over the code. If the code disagrees with this file, the code is wrong. Ask before changing the design.
 - If the report and the code are both silent, ask. Do not guess. Section 12 lists what is already known to be open.
 - The dev set is for tuning. The test set is touched only once, for the final numbers.
