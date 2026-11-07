@@ -1,3 +1,8 @@
+# Keeps the run counters and prints the end of run report and the model comparison table
+# STATS holds counts per layer, pattern, AST verdict, prompt, capped, llm-error and model calls, and RUN_LOG keeps one entry per region
+# reset_stats clears both, print_report prints the counts, and load_ground_truth reads hand labels keyed by pull request, file and conflict index
+# summarize_model scores labeled regions against the hand labels, skipping capped and llm-error ones, and print_table prints one row per model
+
 # per layer counts and the accuracy table
 # this module is shared and holds the run counters that the other modules update
 

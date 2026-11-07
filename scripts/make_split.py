@@ -1,3 +1,8 @@
+# Splits the pull requests of the final dataset into train, dev and test sets
+# The split is by pull request key and never by region, with 15 percent dev, 15 percent test and the rest train
+# split_group sorts and shuffles keys with a fixed seed, and split_rows splits each file count bucket on its own so every set keeps the same mix
+# main reads the index file, writes the split file and prints the count per set and bucket
+
 # splits the pull requests of the final dataset into train, dev and test
 # the split is by pr_key and never by region, so one pull request stays in one set
 # the same seed always gives the same split, so both of us get identical sets

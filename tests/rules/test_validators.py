@@ -1,3 +1,8 @@
+# Tests for the validators using small made up regions
+# They check quoted evidence must appear in the region, layout is ignored, base text and AST change names count and invented quotes fail
+# They check that each logic test check passes and fails on the right regions, from null safety to assignment override
+# They check that confluent interference and unknown test ids always fail and that a structural hint is never confirmed yet
+
 # tests for the validators with small made up regions
 
 from types import SimpleNamespace

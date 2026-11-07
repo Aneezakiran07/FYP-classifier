@@ -1,3 +1,8 @@
+# Deterministic checks that confirm what the model claimed about a region before a logic label is written
+# evidence_is_real requires every quoted piece of the evidence to appear in ours, theirs or base, or to be an AST change name
+# CHECKS holds one cheap text check per logic test, such as null markers, signature lines, control flow lines, shared names or competing assignments
+# validate_logic_test needs both checks to pass, confluent interference always fails, and confirm_structural is not built yet so it returns None
+
 # deterministic checks that confirm what the model said about a region
 # owned by Fatima
 

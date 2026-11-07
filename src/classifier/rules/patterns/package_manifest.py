@@ -1,3 +1,8 @@
+# Stage 3 pattern that labels any conflict inside a package.json file as package
+# It matches the file name only, at any folder depth, so monorepo workspace manifests count too
+# The content is never read and key level merging is left to the resolver
+# PACKAGE_MANIFEST_NAME is also reused by the scope check
+
 import os
 
 from .base import ClassifyInput, DeterministicResult, PatternPlugin

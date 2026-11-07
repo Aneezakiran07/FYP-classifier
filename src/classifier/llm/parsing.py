@@ -1,3 +1,8 @@
+# Turns raw text replies from the model into checked Python values
+# load_json_object pulls a JSON object out of a reply and strips code fences if the model added them
+# parse_kind_response accepts only a router answer with kind structural, semantic or unknown and a non empty reason
+# parse_logic_tests_response needs all seven tests in the fixed order with a met flag and evidence, and returns None for any bad shape
+
 # turns raw model replies into plain values
 # owned by Aneeza
 

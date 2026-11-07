@@ -1,3 +1,8 @@
+# Stage 3 pattern that labels a region disjoint-edits when both sides changed different parts that do not interact
+# It needs a base and checks that the changed base lines do not overlap, the declared names differ, and neither side uses a name the other defines
+# Helper functions find changed lines, strip strings, hide JSX attributes and collect identifiers and declared names
+# The fourth check about a joint use in context lines cannot run because the data has no surrounding lines
+
 import difflib
 import re
 

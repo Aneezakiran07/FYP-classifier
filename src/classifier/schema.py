@@ -1,7 +1,12 @@
+# Shared types and constants used by both the rules side and the llm side
+# It defines the 23 LABELS, the three statuses, the two sources and the four base states
+# strip_family and bare_label clean label names, find_base_state reads the base state and compute_input_hash fingerprints a region
+# Region holds one conflict and its join key, TestAnswer holds one logic test answer, and Result checks the record rules and builds the classifier block
+
 # shared record types and constants
 # this module is shared and changes need both owners to agree
 # it imports nothing from rules or llm so both sides can use it
-
+# Defines labels, statuses, Region, Result and test-answer structures
 import hashlib
 import json
 from dataclasses import dataclass, field

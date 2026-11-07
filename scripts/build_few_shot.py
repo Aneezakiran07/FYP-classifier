@@ -1,3 +1,8 @@
+# Builds the few shot example file for the prompts from real hand labeled regions, nothing is invented
+# main reads the dataset regions and the hand labels, matched by pull request, file path and conflict index
+# For each logic label it keeps up to a set number of examples with base, both sides, the AST verdict, notes and per test answers
+# It writes them in logic test order to few_shot.json and prints any label that has too few examples
+
 import argparse
 import json
 

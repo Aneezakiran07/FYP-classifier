@@ -1,3 +1,8 @@
+# Tests for the llm side, covering prompts, parsing, prompt building, model calling and providers, all with fake replies
+# They check the seven tests keep Table 5.1 order, the logic prompt never asks for a label, and broken reply shapes are refused
+# They check the base notes, few shot loading and splitting by prompt, and that prompt hashes change when the examples change
+# They check retries, permanent rejections, rate limits, truncated output, temperature zero for each provider and token counting
+
 import json
 from types import SimpleNamespace
 

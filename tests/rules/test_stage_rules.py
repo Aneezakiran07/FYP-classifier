@@ -1,3 +1,8 @@
+# Tests for the stage order and the guards of the rule stages, skipped without tree sitter, where any model call is a failure
+# They check a verdict that fails a guard is not labeled, the model is told the content changed, and the gate runs before Stage 3
+# They check OneSideChange runs before ValueOnlyChange, files outside the scope are unknown, and dependency, config and prose files stay in scope
+# They check local renames, names not declared here, whole file deletions as business logic, other no marker regions and scope before no markers
+
 import pytest
 
 pytest.importorskip("tree_sitter")

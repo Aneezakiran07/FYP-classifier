@@ -1,3 +1,8 @@
+# Rules only funnel that runs Stages 0 to 3 with the model off and counts what each stage decides
+# It copies the chosen splits into an input file and runs the pipeline with use_llm off, and the test split needs the include test flag
+# build_funnel counts marker regions by stage and by rule, overall and for TypeScript, and counts no marker records apart
+# print_funnel prints the tables and summary_json saves the numbers, and an earlier run is kept unless overwrite is given
+
 # rules only funnel that runs stages 0 to 3 with the model off and counts what each stage decides
 # it makes no model calls and the regions that reach Stage 4 get no record
 # it reads train and dev by default and the test split only when asked for the final numbers

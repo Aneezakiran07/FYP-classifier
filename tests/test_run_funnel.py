@@ -1,3 +1,8 @@
+# Tests for the run_funnel script on a tiny made up dataset, where any model call is a failure
+# One checks that the funnel counts each stage and the regions that reach Stage 4
+# Others check that the test split is left out unless asked for and an earlier funnel is not overwritten without the flag
+# The last one checks that an unknown split name is refused
+
 import importlib.util
 import json
 from pathlib import Path

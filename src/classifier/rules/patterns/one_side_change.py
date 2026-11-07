@@ -1,3 +1,8 @@
+# Stage 1 pattern that labels a region one-side-change when exactly one side differs from the base
+# It needs a base, collapses whitespace on every file type, and for JavaScript and TypeScript also ignores semicolons, quote style and trailing commas
+# Formatting normalization is turned off when any side holds a regex literal or markup
+# Deletions count too, where one side is empty and the other side still equals the base
+
 import re
 
 from .base import ClassifyInput, DeterministicResult, PatternPlugin

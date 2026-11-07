@@ -1,3 +1,8 @@
+# Tests for the AST gate, skipped when the tree sitter grammars are missing, where any model call is a failure
+# They check the gate labels identical, whitespace, comment, formatting and rename verdicts without the model
+# They check the rename map is reported, a content change is left for the model and an unsupported file type is not analyzed
+# They check that identical text is identical and that the patterns still run before the gate
+
 import pytest
 
 pytest.importorskip("tree_sitter")

@@ -1,3 +1,8 @@
+# Stage 2 pattern that labels a region reorder-only when the same members appear in a different order
+# In the line path both sides hold the same lines and every line is a member of an order insensitive container such as an object, interface or JSON
+# In the block path the region is whole function, type, interface or method declarations with unique names in a different order
+# Statements, calls, assignments, duplicate keys, array items and imports make it step aside
+
 import re
 
 from .base import ClassifyInput, DeterministicResult, PatternPlugin

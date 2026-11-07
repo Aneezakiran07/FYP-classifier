@@ -1,3 +1,8 @@
+# Stage 2 pattern that labels a region documentation when only comments differ
+# Prose files such as md, txt and rst count as documentation whenever their text differs
+# For C style code files it strips comments and JSDoc lines, keeps string literals, and compares what is left
+# Directive comments such as ts ignore or eslint disable are kept as code, and DIRECTIVE_PATTERN and PROSE_EXTENSIONS are reused by other modules
+
 import os
 import re
 

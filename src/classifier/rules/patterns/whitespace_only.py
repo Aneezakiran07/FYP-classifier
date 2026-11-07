@@ -1,3 +1,8 @@
+# Stage 2 pattern that labels a region whitespace-only when both sides have the same tokens and differ only in spacing
+# Tokens come from the tree sitter TypeScript grammar when a snippet parses cleanly, otherwise from a simple lexical tokenizer
+# Strings, template literals and comments are single tokens, and Python, YAML and Makefile files are skipped because indentation matters there
+# It steps aside when line ending return, throw, break, continue or yield counts differ, and _asi_sensitive_count is reused by the AST gate
+
 import os
 import re
 

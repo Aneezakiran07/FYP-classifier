@@ -1,3 +1,8 @@
+# Read only check of the evidence the model gave for the first logic test it marked as met, with no model calls
+# load_regions reads the input regions and first_met finds the selected test in the trace of each output record
+# pieces_of pulls the quoted pieces out of the evidence and where_found looks for each piece in ours, theirs or base
+# main prints per test counts of found pieces, the pieces that were not found and the met tests with no quotes
+
 # read only look at the evidence the model gave for the test it marked as met
 # it checks whether each quoted piece appears in the region text, no model calls
 

@@ -1,3 +1,8 @@
+# Tests for schema.py, the shared labels, helpers and record rules
+# They check there are 23 labels with no family prefix, old prefixed names convert and names outside the taxonomy are refused
+# They check every pattern has a stage, the base state values, and that the input hash tells a missing base from an empty one
+# They check that capped and llm-error refuse a label, classified needs a real label, unknown needs a reason and made up statuses fail
+
 import pytest
 
 from classifier import schema

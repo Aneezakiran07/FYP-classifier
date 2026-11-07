@@ -1,3 +1,8 @@
+# Stage 1 pattern that labels a region same-change when both sides are byte identical
+# The text is compared exactly with no stripping, so outer whitespace differences do not count
+# Empty sides are excluded so regions with no text move on to later stages
+# It returns a high confidence result with the reason that both sides are byte identical
+
 from .base import ClassifyInput, DeterministicResult, PatternPlugin
 
 

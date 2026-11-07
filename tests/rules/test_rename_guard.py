@@ -1,3 +1,8 @@
+# Tests for the name checks behind the rename guard in ast_gate
+# is_declared_in_region must accept array destructuring, catch parameters and type aliases
+# It must reject object destructuring and a bare type inside an import list
+# is_named_export must find named exports and ignore default exports and plain declarations
+
 # tests for the name checks behind the rename guard
 
 from classifier.rules.ast_gate import is_declared_in_region, is_named_export

@@ -1,3 +1,8 @@
+# Builds the final text sent to the model from the prompt templates, the few shot examples and the region
+# load_few_shot reads few_shot.json and format_examples shows router examples for prompt A and per test examples for prompt B
+# build_system fills the examples into a prompt and system_prompt_hash hashes the result for provenance
+# build_user_message gives the file path, the base or a note that it is empty or missing, both sides and the AST evidence
+
 import hashlib
 import json
 

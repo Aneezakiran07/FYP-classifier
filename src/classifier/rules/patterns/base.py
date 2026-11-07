@@ -1,3 +1,8 @@
+# Shared building blocks for every rule pattern
+# Label lists the old family prefixed label names that the patterns return
+# ClassifyInput carries the file path, both sides, the base and the raw region, and DeterministicResult carries the label, the reason and extra flags
+# PatternPlugin is the abstract base class, each pattern sets name, priority and requires and implements detect and resolve
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Literal

@@ -1,3 +1,8 @@
+# Builds a small smoke test input of regions that would reach the model, with no model calls
+# keys_in_split reads the pull requests of one split, train or dev only, never test
+# reaches_model runs the rule stages with the model off and find_candidates keeps every region the rules could not decide
+# main samples a seeded random set, writes it in the dataset shape grouped by pull request, and prints the size of the sample
+
 # picks a random set of regions that reach the model from one split, with no model calls
 # the output has the same shape as the dataset so the normal command can run on it
 

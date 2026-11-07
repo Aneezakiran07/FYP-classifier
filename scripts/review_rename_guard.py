@@ -1,3 +1,8 @@
+# Read only review of what the rename guard keeps and rejects, with no model calls
+# review_region finds TypeScript regions the AST engine calls a rename, and pick_group sorts them by outcome in the same order as the gate
+# why_not_declared guesses why an old name was not seen as declared, such as destructuring, a catch parameter or an import
+# main skips the test split, prints counts per group, and write_examples writes a seeded sample of each group to a text file
+
 # read only review of the rename guard, no model calls and nothing is changed
 # it finds regions the parser calls a rename and shows which ones the guard rejects and why
 

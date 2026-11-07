@@ -1,3 +1,8 @@
+# Holds the fixed prompt texts and settings for Stage 4
+# PROMPT_A is the router prompt that asks for structural, semantic or unknown with a short reason
+# PROMPT_B asks the model to answer all seven logic tests with evidence, without naming a final label
+# It also defines LOGIC_TESTS in Table 5.1 order, STRUCTURAL_LABELS, the few shot file path, the example length limit and the prompt versions
+
 import os
 
 # Examples live in a json file so they can be swapped without editing the prompts

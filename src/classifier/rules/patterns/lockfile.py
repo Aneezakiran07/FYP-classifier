@@ -1,3 +1,8 @@
+# Stage 3 pattern that labels any conflict inside a dependency lockfile as lockfile
+# LOCKFILE_NAMES lists exact file names such as package-lock.json, yarn.lock, pnpm-lock.yaml, Cargo.lock and go.sum
+# The check uses only the file name and never reads the content
+# The resolver later regenerates the file from the merged manifest, which this pattern does not check
+
 import os
 
 from .base import ClassifyInput, DeterministicResult, PatternPlugin

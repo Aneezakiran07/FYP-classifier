@@ -1,3 +1,8 @@
+# One entry point for calling any supported model provider at temperature zero
+# MODEL_ALIASES turns friendly names such as hackclub-classify into real model names and provider_for picks the provider
+# check_available confirms the SDK and the API key exist, and _client builds and caches one client per provider
+# call_model sends the request, counts tokens in USAGE, and raises TruncatedOutput or ProviderUnavailable when a reply is cut off or a provider cannot be used
+
 import os
 from collections import Counter
 

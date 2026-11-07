@@ -1,3 +1,8 @@
+# Sends Stage 4 questions to the model and returns parsed answers, the model never picks a label
+# route runs the router prompt A and run_logic_tests runs the seven logic tests prompt B
+# ask_model retries a badly shaped reply once with a stricter reminder and call_with_retry retries transport errors with capped backoff
+# Failures raise ModelCallFailed with a reason code such as transport-error or invalid-answer, and every call is counted in STATS
+
 # model calling for stage 4
 # owned by Aneeza
 # the model only answers questions here and the pipeline turns answers into labels

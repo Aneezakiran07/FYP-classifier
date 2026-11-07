@@ -1,3 +1,8 @@
+# Tests for the make_split script, loaded from the scripts folder by its file path
+# They check that the same seed gives the same split and a different seed gives a different one
+# They check that input order does not change the split and every pull request lands in exactly one set
+# They check that each file count bucket keeps the same dev, test and train shares
+
 import importlib.util
 from collections import Counter
 from pathlib import Path

@@ -1,3 +1,8 @@
+# Command line entry point that runs the classifier on an input JSONL file and writes an output JSONL file
+# main reads the flags for model, models, delay, retries, max calls, rerun, retry errors, labels and no llm, and refuses bad combinations
+# With one model it checks the provider first, and with several models it writes one output per model and prints an accuracy table
+# output_path_for_model names each per model file and print_usage shows the tokens used
+
 # command line entry point for the classifier
 # this module is shared and changes need both owners to agree
 

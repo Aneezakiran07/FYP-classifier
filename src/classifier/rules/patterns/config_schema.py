@@ -1,3 +1,8 @@
+# Stage 3 pattern that labels any conflict inside a declarative config file as config-schema
+# is_config_name matches exact names such as jsconfig.json, tsconfig json files, prefixes such as eslintrc and env, and yml, yaml, toml or json extensions
+# The check uses only the file name and never the content, and executable config such as vite.config.ts is left as code
+# Lockfiles and package.json are claimed earlier by their own patterns, so they never reach this one
+
 import os
 
 from .base import ClassifyInput, DeterministicResult, PatternPlugin

@@ -1,3 +1,8 @@
+# End to end tests for pipeline.py and cli.py with a fake model, so no real API call is made
+# They cover the output record, rule and model provenance, resume, rerun, the models flag and the accuracy table
+# They cover Stage 4 where the first met test wins, the trace, the validator, structural hints, router unknown and confluent interference as unknown
+# They cover capped and llm-error records, the per file call ceiling, retries, retry errors, max calls and stopping after failures in a row
+
 import json
 
 import pytest

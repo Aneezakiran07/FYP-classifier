@@ -1,3 +1,8 @@
+# Positive and negative tests for each rule pattern, built with the small make helper
+# They cover NoMarkers, SameChange, WhitespaceOnly, CommentsOnly, Lockfile, PackageManifest and ConfigSchema
+# They also cover OneSideChange, DisjointEdits, ImportPathOnly and ReorderOnly
+# Edge cases include string contents, directive comments, indentation significant files, a missing base and executable config
+
 import os
 import sys
 

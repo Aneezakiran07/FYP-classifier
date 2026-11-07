@@ -1,3 +1,8 @@
+# Stage 3 pattern that labels a region import-path when the same binding is imported from two different module paths
+# It fires only when every changed line belongs to an import statement, and multi line imports are grouped first
+# _binding_sources maps each imported name, alias or namespace to its sources, and a name with two sources on one side is skipped
+# Its regular expressions and helper functions are also reused by the import restructure pattern
+
 import difflib
 import re
 

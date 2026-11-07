@@ -1,3 +1,8 @@
+# Stage 2 pattern that labels a region import-restructure when the same imports are only arranged differently
+# The region must hold only JavaScript or TypeScript import or require statements, parsed into binding, form, original name and source
+# These sets must match on both sides while statement order, merging or splitting may differ, and side effect imports must keep their order
+# Duplicate bindings, import type statements, comments or any other line make it step aside for later stages
+
 import re
 
 from .base import ClassifyInput, DeterministicResult, PatternPlugin

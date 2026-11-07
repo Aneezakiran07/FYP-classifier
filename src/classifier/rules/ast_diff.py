@@ -1,3 +1,8 @@
+# The AST difference engine that compares ours and theirs as tree sitter syntax trees
+# It picks a grammar from the file extension, wraps code fragments so they parse, and turns both sides into token lists
+# build_ast_summary compares the tokens and reports the verdict, the changes, a rename map and node and name differences, and format_for_prompt prints it
+# compute_ast_equivalence returns an ASTEquivalence holding one of seven verdicts such as identical or content_changed, and demo shows examples
+
 import difflib
 import importlib
 import json

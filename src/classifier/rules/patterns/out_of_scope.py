@@ -1,3 +1,8 @@
+# Stage 0 pattern that labels files outside the project scope as unknown with the reason out-of-scope
+# It matches built, generated or vendored folders such as dist, build, node_modules and snapshots, plus minified, map and snap files
+# It also rejects any file that is not TypeScript, prose, a lockfile, package.json, declarative config or a JavaScript config file
+# It runs first of all patterns so nothing else can claim a region inside such a file
+
 import os
 import re
 

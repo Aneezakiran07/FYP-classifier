@@ -1,3 +1,8 @@
+# Read only comparison of the old and the new rename guard on every rename region, with no model calls
+# It reads TypeScript regions outside the test split that the AST engine calls a rename and that pass the other guards
+# old_is_declared and old_is_local_rename keep a copy of the old guard, and is_local_rename from ast_gate is the new one
+# main counts regions kept or rejected by both, newly kept or newly rejected, and writes the changed regions to a text file
+
 # compares the old rename guard with the new one on every rename region
 # read only, no model calls and nothing in the repo is changed
 

@@ -1,3 +1,8 @@
+# Runs every region through Stages 0 to 5 and writes one classifier record per region, the only module that calls both rules and llm
+# classify_region runs the early patterns, the AST gate with its guards, the Stage 3 patterns and then Stage 4 through run_stage_4
+# Stage 4 picks the first met logic test, checks it with the validator, needs a rule to confirm a structural hint, and records failures as llm-error
+# run_one handles resume, rerun, retry of errors, the per file call ceiling and early stops, and the build block functions write classified, capped and error records
+
 # stages 0 to 5 orchestration and record writing
 # this module is shared and changes need both owners to agree
 # it is the only place that calls both rules and llm

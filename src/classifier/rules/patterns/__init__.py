@@ -1,3 +1,8 @@
+# Registry of all rule patterns in stage order, which is also the tie break order
+# PATTERNS lists each pattern with its priority, from OutOfScope at Stage 0 to DisjointEdits at Stage 3
+# first_match tries the eligible patterns by priority, skips a pattern that crashes, and returns the first name and result
+# classify_before_gate runs Stages 0 to 2 before the AST gate, classify_boundary_stage runs Stage 3 after it, and classify_deterministic runs them all
+
 from .base import ClassifyInput, DeterministicResult, PatternPlugin
 from .out_of_scope import OutOfScope
 from .no_markers import NoMarkers

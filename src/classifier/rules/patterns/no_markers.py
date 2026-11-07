@@ -1,3 +1,8 @@
+# Stage 1 pattern for records with no conflict markers, where there is no text to compare
+# A whole file deleted on one side and modified on the other is labeled business-logic-conflict
+# Every other no marker conflict type is labeled unknown with the reason no-markers
+# DELETION_TYPES lists the two conflict types that mean one side deleted the file
+
 from .base import ClassifyInput, DeterministicResult, PatternPlugin
 
 DELETION_TYPES = ("deleted_by_us", "deleted_by_them")

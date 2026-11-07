@@ -1,3 +1,8 @@
+# Stage 3 pattern that labels a region value-only-change when only one infrastructure literal differs
+# The two sides must have equal tokens except for one number or string bound to a name or passed as a call argument
+# That name must hold an infrastructure word such as port or timeout and no business word such as price, and manifest and config paths are skipped
+# It steps aside when one side still equals the base, and the result is marked policy resolved
+
 import os
 import re
 

@@ -1,3 +1,8 @@
+# Read only measurement of the validators on smoke test records, with no model calls
+# For the first met test of each record it runs evidence_is_real, the test specific check and validate_logic_test
+# It reuses load_regions and first_met from check_evidence to read the regions and the traces
+# main prints how many answers pass each check per test and shows examples where the evidence was real but the check failed
+
 # read only measurement of the validators on the smoke test records
 # it shows how many of the model answers each check lets through, no model calls
 

@@ -1,3 +1,8 @@
+# Turns a passing AST verdict into a label with no model call, as part of Stage 2
+# GATE_LABELS maps the identical, whitespace, comments, formatting and rename verdicts to their labels and reasons
+# apply_guards marks a verdict as content changed when line ending keywords or directive comments differ, and marks files with no parser as not analyzed
+# is_local_rename, is_declared_in_region and is_named_export accept a rename only when every old name is declared locally and not exported
+
 # label table for the ast gate verdicts
 # owned by Fatima
 
