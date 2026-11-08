@@ -12,4 +12,5 @@ Record a one line reason for every hand label so it can be reused as a few shot 
 Add tie break decisions below as the team agrees on them.
 
 ## Agreed tie breaks
-(empty for now)
+- Same change plus extra (D12). Both sides changed from base and one side's result is the other side's result plus something extra. No label fits, so label it unknown with the reason "same change plus extra, no label defined".
+- Value-only-change is broadened (D12). It now means only a literal's text differs and nothing else in the region differs, so UI and log text count, not only infrastructure values. If the text is used in a condition or code compares against it, use the logic labels instead. If anything else differs too, such as an added line, it is not value-only-change.
