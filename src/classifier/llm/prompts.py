@@ -11,7 +11,7 @@ MAX_EXAMPLE_CHARS = 500
 
 # Bump a version whenever the text of that prompt changes
 ROUTER_PROMPT_VERSION = "router-v1"
-LOGIC_PROMPT_VERSION = "logic-v1"
+LOGIC_PROMPT_VERSION = "logic-v2"
 
 # The seven logic tests in the fixed order of Table 5.1
 # A test carries the name of the label it supports, and the pipeline picks the label
@@ -43,7 +43,7 @@ PROMPT_B = (
 Answer every test on its own, in the order given, even after one is met. Do not pick a winner and do not name a final answer.
 You see the file path, the base version when it exists, both sides and parser evidence. The message says whether the base is present, empty or unavailable. When it is present, use it to see which side changed what. When it is not, judge from the difference between the sides and do not guess the direction of change.
 
-Terms. A target is one named thing that holds a value or a shape: a variable, a property, a key, a JSX attribute, a default parameter, or the declared type of any of these. A member is one distinct property, key, attribute or field of an entity. Tokens inside one string value, such as the words of a className, are not separate members.
+Terms. A target is one thing that holds a value or a shape: a variable, a property, a key, a JSX attribute, a JSX child expression, a default parameter, or the declared type of any of these, including a parameter or return type annotation. A member is one distinct property, key, attribute or field of an entity. Tokens inside one string value, such as the words of a className, are not separate members.
 
 """
     # tests one to three come first so assignment override cannot pre-empt them
@@ -63,6 +63,7 @@ Terms. A target is one named thing that holds a value or a shape: a variable, a 
    - they change different members or operations of it, linked so the merged state is a hybrid neither side intended
    - they compete over one member and the sides also differ in at least one other member of that entity
    - one side renames a symbol and the other side makes a non-rename edit that still uses the old name
+   A type annotation written on one target, such as a return type or a parameter type, is the declared type of that target and belongs to test 5, even when it lists several members.
 """
     # test five names declared types and unions as targets because that is where the observed failures sat
     """5. assignment-override
@@ -72,8 +73,10 @@ Terms. A target is one named thing that holds a value or a shape: a variable, a 
     """6. confluent-interference
    Each side changes a different entity, and a line that reads both entities together is visible in the text you were given. Do not assume such a line exists.
 7. business-logic-conflict
-   The residual test, met only when tests 1 to 6 are all not met. It includes a differing literal that sits directly in a condition, a return value or a call argument, different multi-statement or branching logic, and one side removing code the other side modified.
+   The residual test, met only when tests 1 to 6 are all not met. It includes a differing literal that sits directly in a condition or that code compares against, different multi-statement or branching logic, and one side removing code the other side modified.
    A change confined to one target is never met here. Test 5 covers it.
+   A literal that differs and is used in no condition, such as display text, a log message or a label, is never met here.
+   If one side's result is the other side's result plus extra code, this test is not met.
 
 """
     # every test needs evidence so the validator and the trace have something to read
