@@ -4,7 +4,7 @@
 
 Dev has 2131 regions that reach the model and 1430 of them pass the size rule and are not labeled yet. This is a random sample of short regions, not of all regions, so say so next to any accuracy number from it.
 
-Regions 61 to 70 are shared. Aneeza and Fatima both label them on their own and then compare, to settle tie breaks. The rest can be split between the two of you.
+Fatima labels all 50 regions, by hand and without AI help, because this batch is the answer key for scoring. Regions 61 to 70 are shared: Aneeza also labels them on her own, and the two sets are compared to measure agreement and settle tie breaks. Neither person looks at the other's labels for 61 to 70 until both are done.
 
 Do not use any of these regions as a few shot example, because this batch is for scoring.
 
