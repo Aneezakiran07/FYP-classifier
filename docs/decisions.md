@@ -97,6 +97,7 @@ Answered by Aneeza. Everything that touches `rules/` or a shared file still need
 
 ### Answered, applied in later steps
 - Stage 0 (step 2): the report scopes to TypeScript, so `.js`, `.jsx`, `.mjs` and `.css` are out of scope unless they are config files. Any dependency lockfile counts, including `bun.lock`, `bun.lockb` and `Cargo.lock`. The prose list is to be proposed.
+- Stage 0, generated TypeScript (added by D14, 2026-11-08): a file ending in `.gen.ts` or `.gen.tsx`, or any file inside a folder named `__generated__` or `generated`, is out of scope. Examples are `routeTree.gen.ts` and `sdk.gen.ts`.
 - Deletions (step 2): a deletion on one side is `business-logic-conflict`, not `one-side-change` (Table 5.1 and 5.3.2). The other no-marker regions are proposed as `unknown` with a reason, to be agreed with Fatima.
 - Trace (step 2): tests after the deciding one appear as skipped with a reason.
 - Base in prompts (step 4): the prompts include the base. An empty base means both sides are additions. With no base the direction is unknown.
@@ -376,3 +377,112 @@ Aneeza's area (`src/classifier/llm/` and `scripts/build_few_shot.py`). `tests/te
 - `tests/llm/test_prompts.py`: two tests now expect no router examples and the new layout, and are renamed to say so. New tests cover the example layout and which errors are retried.
 - `tests/test_pipeline.py`: the transport outage test raises `ConnectionError` instead of `RuntimeError`, because a plain `RuntimeError` is now an unexpected error, not a transport error.
 - New file `tests/test_build_few_shot.py` with seven tests for the builder.
+
+## D14. Rule fixes from batch 1 of Aneeza's review (2026-11-08)
+Fatima's area (`src/classifier/rules/` and `tests/rules/`). Built without waiting, so Aneeza can review and change any of it, the same way D8 and D10 worked. This file and the line added to D3 are shared. Nothing in `llm/`, `tests/llm/`, `schema.py`, `pipeline.py`, `cli.py`, `report.py` or `tests/test_pipeline.py` changed. Batch 2 (C1, C3, C4, D, E, and DisjointEdits on an empty base) is left for both of us.
+
+Every fix started from a test built from Aneeza's repro that failed before the fix. No existing test was edited or deleted.
+
+### A1. A template string and a plain string are no longer the same (`ast_diff.py`)
+- **Problem.** `normalized_keys` dropped the quote characters of every string for the formatting check. A plain string holding `${name}` is literal text, while a template string inserts the value, so `"Hi ${name}"` against `` `Hi ${name}` `` was called `formatting`.
+- **Fix.** A template string that contains `${` keeps its backticks in the key. Every other string still loses its quotes, so `'x'` against `"x"`, and `` `x` `` with no `${` against `"x"`, stay `formatting`.
+- **Effect.** Such a region is now `content_changed` and goes on to Stage 3 and then Stage 4.
+
+### A2. A semicolon that changes behavior is kept (`ast_diff.py`)
+- **Problem.** Every `;` was dropped for the formatting check. Without it, a next line starting with `(`, `[` or a backtick continues the line above, so `x = y` followed by `(z || w).run()` calls `y(z || w)`.
+- **Fix.** A `;` whose next token is `(`, `[` or a template string is kept in the key. Every other `;` is still dropped, so `x = y;` against `x = y` before a line starting with a name stays `formatting`.
+- **Why tokens and not lines.** The token list has no line breaks. The same joining happens on one line, so the check looks at the next token only.
+- **Known limit.** A next line that starts with `+`, `-` or `/` can also join the line above without a semicolon, for example `x = y` followed by `-z` reads as `x = y - z`, and a line starting with a regex reads as a division. These are not covered, so such a region can still be called `formatting`. They are rarer than `(`, `[` and a backtick and were left out of batch 1 on purpose.
+
+### A3. DisjointEdits counts names a side deleted (`patterns/disjoint_edits.py`)
+- **Problem.** Names were collected only from lines a side added or rewrote. A side that deleted a declaration added no names, so the other side could keep using that name and the region still counted as disjoint. Merging both leaves a name with no declaration.
+- **Fix.** The third check also collects the names declared on base lines that a side deleted or replaced (the same declaration patterns as before, including assignments). If the changed lines of the other side use one of them, the region is not disjoint and goes to Stage 4.
+- **Refined after the first funnel run.** A name counts as deleted only when the side no longer declares it locally anywhere in its own text (`_locally_declared`). The first version also refused regions where a side only rewrote a declaration line, such as `event =>` to `(event) =>`, which still declares `event` (`Geminitic/RCF_Website#204`, `SyrianCitiesMap.tsx`, index 2). A side that deleted everything declares nothing, so those regions are refused as before.
+- **What counts as a local declaration, second refinement.** The second funnel run (`funnel_d14b`) let 3 regions back into `disjoint-edits`. Fatima asked whether a name in an `export { }` list counted as still declared, as in `cognoco/User-Mgmt#693`, `src/types/auth.ts`, index 0. A plain export list did not count, but two weaker cases did, and both are wrong in the same way as D9:
+  - a bare `type X` inside an import or export list, which names a type from another file;
+  - an object key or an assignment (`emailSchema: null`, `x = 1`), because the check for still declared names reused the two loose patterns that `_declared_names` uses for the second and third checks.
+  Now only `const`, `let`, `var`, `function`, `class`, `interface`, `enum`, a type alias (`type X =` or `type X<`) and function or arrow parameters count, and every import and export list is masked first. A name imported again (`import { x } from`) also does not count. That errs toward refusing, which sends the region to the model. `scripts/explain_disjoint.py` shows which case explained `auth.ts`: the object key and type member case, not the export list. Ours deletes the interfaces and schemas and re-exports them from `@/core/auth/models`. In `funnel_d14b`, the members `success` and `error` in ours' own `AuthState` still counted as declared, so the region was accepted. In `funnel_d14c` they no longer count, and the region is refused because theirs' new `deleteAccount` type uses `success` and `error`, which ours "deleted" with the base interfaces.
+- **Known limit, found on `auth.ts`.** The names collected from deleted base lines still use the loose patterns, so interface members and object keys count there too. `auth.ts` is now refused because of the member names `success` and `error`, which belong to unrelated types. Read as code, theirs only changes the `deleteAccount` signature, which ours keeps unchanged, so `disjoint-edits` was arguably right for this region. The error sends the region to the model, which is the safe direction. Making the deleted set strict too would move more regions, so it is left for batch 2.
+- **Parameter pattern.** `_parameter_names` uses the same parameter list pattern as the rename guard in `ast_gate.py`. It is copied, not imported, because `ast_gate.py` imports the patterns package and an import back would be circular.
+- **Known limit.** A name that the side deletes here but declares outside the region still blocks the label, because the region cannot show the outside. That sends the region to the model, which is the safe direction.
+
+### B1. OneSideChange treats an empty base as a real base (`patterns/one_side_change.py`)
+- **Problem.** An empty base `""` was handled like a missing base, so a region with an empty base and exactly one blank side went to the model, although only one side changed by definition.
+- **Fix.** `OneSideChange` now asks the registry for `both` and returns false itself only when the base is missing (`None`). With an empty base, one blank side and one side with text is `one-side-change`. Two sides with text are not.
+- **`first_match` and `has_base` in `patterns/__init__.py` are unchanged**, because they affect every pattern and the paused Stage 0 to 3 trace work rewrites that function.
+- **DisjointEdits is unchanged on an empty base**, as agreed. Its own `if not h.base_text` stop and the registry gate both stay.
+- **Stage order, decided by Fatima.** `OneSideChange` is Stage 1 and runs before every Stage 2 and Stage 3 rule. An empty base region with one blank side is now `one-side-change` even when a later rule such as `CommentsOnly` or `Lockfile` would have labeled it. A region with a present base already works this way, and `CLAUDE.md` section 4 puts identity before shape and boundary. The compare script shows these regions as their own group, "B1, taken from another rule". In train and dev this was 3 regions, all from `CommentsOnly` (`documentation`): two `README.md` files and one `src/App.tsx` comment line. No lockfile, package or config region changed.
+- **Record field.** `base_available` in the old fields stays false for an empty base, because `pipeline.py` sets it and is shared. `base_state` already says `empty`.
+
+### C2. Generated TypeScript is out of scope at Stage 0 (`patterns/out_of_scope.py`)
+- **Fix.** A file ending in `.gen.ts` or `.gen.tsx`, or any file inside a folder named `__generated__` or `generated`, is `unknown` with `out-of-scope`. The folder name must match a whole path segment, so `regenerated/`, `generator.ts` and `generated.ts` stay in scope. D3 is updated.
+- **Also affects** no marker records in those folders, because Stage 0 runs before the no marker check. A whole file deletion there becomes `unknown` with `out-of-scope` instead of `business-logic-conflict`.
+- **Beyond the review's examples, for Aneeza to confirm.** The review named `routeTree.gen.ts`, `sdk.gen.ts`, `__generated__/` and `generated/` as examples. `.gen.tsx` was added by Fatima, and the `generated` folder counts for every file inside it, not only TypeScript. Both reach further than the examples.
+- **In train and dev, 19 of the 68 C2 regions are not TypeScript**, all inside a `generated` folder: 17 prose regions that were `documentation` (the examples shown are `generated/COMPONENT_TYPES.md`) and 1 in `frontend/src/generated/api/kiota-lock.json` that was `config-schema`. They are generated files, which the report puts out of scope, but they reach beyond the TypeScript examples. Aneeza to confirm.
+- `is_generated_path` is a new public helper, so the compare script imports the rule instead of copying it.
+
+### Headers changed
+- `patterns/out_of_scope.py`, line 2: now lists the `generated` folder and `gen.ts` files.
+- `patterns/disjoint_edits.py`, line 2: the third check now says "a name the other defines or deleted".
+- New files with a four line header: `scripts/compare_funnels.py`, `scripts/explain_disjoint.py`, `tests/test_compare_funnels.py`, `tests/test_explain_disjoint.py`.
+
+### `scripts/compare_funnels.py`
+- Read only. It takes two funnel folders, such as `outputs/funnel_base` and `outputs/funnel_d14`, joins their `rules.jsonl` on `pr_key`, `file_path` and `effective_index`, and checks that both `input.jsonl` files hold the same regions.
+- A region with no record counts as the label `Reached Stage 4`. An `unknown` label is shown with its reason, such as `unknown (out-of-scope)`.
+- Changed regions are grouped by old and new label, marker regions apart from no marker records. Each group shows counts, how many are TypeScript, example keys with a short snippet of base, ours and theirs, and any dev hand label in `data/labels` that falls in it.
+- Each changed region is matched to the fix that can cause it: A1 or A2 (`formatting` from the gate, with a template string placeholder or a line starting with `(`, `[` or a backtick), A3 (`disjoint-edits` to Stage 4), B1 (to `one-side-change` on an empty base), C2 (to `unknown (out-of-scope)` on a generated path). Any other change is flagged as not explained.
+- Regions whose label stayed the same but whose deciding rule changed are listed apart.
+- Named `compare_funnels.py` because the paused trace chat has a `compare_records.py`.
+
+### `scripts/explain_disjoint.py`
+- Read only. It prints one region in full from a funnel `input.jsonl`, by `pr_key`, `file_path` and conflict index, then every name set DisjointEdits computes for each side and which check stops the label. It is for reading DisjointEdits decisions by hand, now and in batch 2.
+
+### Checked on dev regions, never the test split
+- The 60 dev regions in `data/labels/to_label.md` and `to_label_batch2.md` were rebuilt from their text and run through the old and the new rules. All 60 reached Stage 4 on the old code. Exactly one changed: dev region 7, `routeTree.gen.ts`, hand labeled `unknown` for being generated, is now `unknown (out-of-scope)` from C2. This matches its hand label.
+- Dev regions 2, 6, 14 and 20 (hand labeled `disjoint-edits` on an empty base) are unchanged, as expected, because B1 does not touch DisjointEdits.
+- No labeled region is `formatting` or `disjoint-edits` on the old code, so A1, A2 and A3 cannot be checked against hand labels yet.
+
+### Regions each fix changed
+Train and dev, `outputs/funnel_d14c` (the final code) against `outputs/funnel_base` with `scripts/compare_funnels.py`. 30,355 marker regions and 1,061 no marker records, 31,416 in all. 212 labels changed and none is unexplained. The A3 rows give the first version (`funnel_d14`), the parameter refinement (`funnel_d14b`) and the final version (`funnel_d14c`). B1 and C2 do not change between the three runs.
+
+| Fix | Change | Regions | `.ts` or `.tsx` |
+|---|---|---|---|
+| A1 or A2 | `formatting` to another label or Stage 4 | 0 | 0 |
+| A3, first version | `disjoint-edits` to Stage 4 | 102 | 102 |
+| A3, parameter refinement | `disjoint-edits` to Stage 4 | 99 | 99 |
+| A3, final | `disjoint-edits` to Stage 4 | 100 | 100 |
+| B1 | Stage 4 to `one-side-change` | 41 | 41 |
+| B1 | `documentation` to `one-side-change` | 3 | 1 |
+| C2 | Stage 4 to `unknown (out-of-scope)` | 46 | 46 |
+| C2 | `documentation` to `unknown (out-of-scope)` | 17 | 0 |
+| C2 | `config-schema`, `import-restructure`, `reorder-only` to `unknown (out-of-scope)` | 1 each | 0, 1, 1 |
+| C2 | no marker `business-logic-conflict` to `unknown (out-of-scope)` | 2 | 2 |
+| None | not explained | 0 | 0 |
+
+Marker regions by stage:
+
+| Stage | Base | D14 final (`funnel_d14c`) | Change |
+|---|---|---|---|
+| Stage 0 scope | 1,673 | 1,739 | +66 (C2) |
+| Stage 1 identity | 562 | 606 | +44 (B1) |
+| Stage 2 shape | 1,447 | 1,425 | -22 (C2 19, B1 3) |
+| Stage 3 boundary | 14,793 | 14,692 | -101 (A3 100, C2 1) |
+| Reached Stage 4 | 11,880 | 11,893 | +13 (A3 +100, C2 -46, B1 -41) |
+
+- **A1 and A2 changed no region in train and dev.** They close real holes found by the repros, but no train or dev region hits them today. The 141 `formatting` regions from the gate are unchanged.
+- **A3 is larger than the review's estimate.** The review counted about 7 of 366 DisjointEdits decisions in dev. The final version moves 100 of 1,946 in train and dev (5.1 percent), and DisjointEdits now decides 1,846. The first version moved 102. The parameter refinement gave back 3 (`SyrianCitiesMap.tsx`, `sendWakuSettingsUpdate.ts` and `auth.ts`), and the local declaration refinement took `auth.ts` again. The examples shown read as real deletions, such as one side deleting a whole function the other side adds to. `auth.ts` is the known limit above.
+- **The three regions Fatima checked.** `SyrianCitiesMap.tsx` stays `disjoint-edits`, which is right, because `(event)` still declares `event`. `sendWakuSettingsUpdate.ts` stays `disjoint-edits` and is a batch 2 question, below. `auth.ts` goes to Stage 4.
+- **Dev hand labels.** The only changed region with a hand label is dev region 7, `routeTree.gen.ts`, hand labeled `unknown`, now `unknown (out-of-scope)`. It matches.
+
+### Tests
+- New tests only. `tests/rules/test_ast_gate.py`: 6 for A1 and A2. `tests/rules/test_patterns.py`: 6 for A3 (3 from the repro, 1 for the parameter rewrite, 2 for local declarations), 5 for B1. `tests/rules/test_stage_rules.py`: 10 for C2. New file `tests/test_compare_funnels.py`: 4. New file `tests/test_explain_disjoint.py`: 3.
+- The test for a `type` in an export list passed before its fix, because the third check already refuses that case when the list is on a changed line. It stays as a guard.
+- The comment "An empty base counts as no base" in `test_registry_diff3_only_runs_with_base` is now only true for patterns other than `OneSideChange`. The test still passes, because both sides there have text, and it was not edited.
+
+### Batch 2 questions found while checking A3
+- **A control flow line added around the other side's code.** `roymichaels/blue-ocean#323`, `lib/waku/sendWakuSettingsUpdate.ts`, index 1, is `disjoint-edits`, but theirs wraps lines in a new `try` block while ours changes lines nearby. Adding `try`, `if` or a loop can change whether the other side's lines run, which is execution-perturbation territory. No change in batch 1.
+- **`type X` in import lists and object keys in the second and third checks.** `_declared_names` still counts a bare `type X` inside an import or export list, and object keys, as declared names for the second and third checks. This was there before D14 and is left as it is, because changing it moves regions that A3 does not touch.
+
+### For Aneeza to look at
+- The stage order choice in B1, and whether the `generated` folder name is too wide (it also covers non TypeScript files in such a folder, which Stage 0 already sends out of scope unless they are config or prose).
+- DisjointEdits on an empty base (dev region 27) is still open and waits for both of us.

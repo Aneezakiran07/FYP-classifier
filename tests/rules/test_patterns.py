@@ -355,3 +355,88 @@ def test_registry_skips_a_broken_pattern():
         assert name == "SameChange"
     finally:
         PATTERNS.pop()
+
+# DisjointEdits and deleted declarations, A3 from the review
+
+def test_disjoint_edits_refuses_a_use_of_a_name_the_other_side_deleted():
+    # Ours deletes the declaration of limit while theirs still uses it, so the merge has no declaration
+    base = "const limit = 10;\nrun();\nshow(limit);"
+    ours = "run();\nshow(limit);"
+    theirs = "const limit = 10;\nrun();\nshow(limit, true);"
+    assert not DisjointEdits().detect(make(ours, theirs, base=base))
+    # The same holds with the sides swapped
+    assert not DisjointEdits().detect(make(theirs, ours, base=base))
+
+
+def test_disjoint_edits_refuses_a_use_of_a_name_the_other_side_replaced():
+    # Ours replaces the declaration of limit with a declaration of max while theirs still uses limit
+    base = "const limit = 10;\nrun();\nshow(limit);"
+    ours = "const max = 10;\nrun();\nshow(limit);"
+    theirs = "const limit = 10;\nrun();\nshow(limit, true);"
+    assert not DisjointEdits().detect(make(ours, theirs, base=base))
+
+
+def test_disjoint_edits_still_fires_when_a_deleted_name_is_not_used_by_the_other_side():
+    # Ours deletes a declaration that the changed lines of theirs never use
+    base = "const unused = 1;\nrun();\nshow(limit);"
+    ours = "run();\nshow(limit);"
+    theirs = "const unused = 1;\nrun();\nshow(limit, true);"
+    assert DisjointEdits().detect(make(ours, theirs, base=base))
+
+
+# OneSideChange on an empty base, B1 from the review
+
+def test_one_side_change_fires_on_an_empty_base_with_one_blank_side():
+    # An empty base is a real base, so a side that stayed blank did not change
+    assert OneSideChange().detect(make("", "const a = 1;", base=""))
+    assert OneSideChange().detect(make("const a = 1;", "\n", base=""))
+    name, result = classify_deterministic_named(make("", "const a = 1;", base=""))
+    assert name == "OneSideChange"
+    assert result.label == "mechanical/one-side-change"
+
+
+def test_one_side_change_does_not_fire_on_an_empty_base_when_both_sides_added():
+    assert not OneSideChange().detect(make("const a = 1;", "const b = 2;", base=""))
+
+
+def test_one_side_change_still_needs_a_base_that_exists():
+    # A missing base gives no direction, so a blank side is not known to be unchanged
+    assert not OneSideChange().detect(make("", "const a = 1;", base=None))
+    assert classify_deterministic_named(make("", "const a = 1;", base=None)) is None
+
+
+def test_disjoint_edits_still_does_not_run_on_an_empty_base():
+    # B1 changes only OneSideChange, DisjointEdits on an empty base waits for Aneeza
+    assert not DisjointEdits().detect(make("const a = 1;", "const b = 2;", base=""))
+
+
+def test_one_side_change_on_an_empty_base_keeps_the_stage_order():
+    # Stage 1 runs before Stage 3, the same as for a present base, recorded in D14
+    name, _ = classify_deterministic_named(make("", "a@1:\n  version 1", path="yarn.lock", base=""))
+    assert name == "OneSideChange"
+    name, _ = classify_deterministic_named(make("", "a@1:\n  version 1", path="yarn.lock", base="a@0:"))
+    assert name == "Lockfile"
+
+
+def test_disjoint_edits_ignores_a_declaration_the_side_still_makes():
+    # Theirs only rewrites the parameter event as (event), so event is still declared there
+    base = ".on('move', event => {\n  tip\n    .style('left', event.offsetX + 'px');"
+    ours = ".on('move', event => {\n  const [x, y] = pointer(event);\n  tip.style('left', x + 'px');"
+    theirs = ".on('move', (event) => {\n  tip\n    .style('left', event.offsetX + 'px');"
+    assert DisjointEdits().detect(make(ours, theirs, path="src/map.tsx", base=base))
+
+
+def test_disjoint_edits_does_not_count_a_type_in_a_module_list_as_still_declared():
+    # Ours deletes the type alias and re-exports a type of that name from another file, which is not a local declaration
+    base = "type Options = { a: number };\nrun();\nuse(x);"
+    ours = "export { type Options } from './types';\nrun();\nuse(x);"
+    theirs = "type Options = { a: number };\nrun();\nconst o: Options = make();"
+    assert not DisjointEdits().detect(make(ours, theirs, base=base))
+
+
+def test_disjoint_edits_does_not_count_an_object_key_as_still_declared():
+    # Ours deletes the declaration of emailSchema and keeps only an object key of that name
+    base = "const emailSchema = z.string();\nconst form = { emailSchema: null };\nshow(form);"
+    ours = "const form = { emailSchema: null };\nshow(form);"
+    theirs = "const emailSchema = z.string();\nconst form = { emailSchema: null };\nshow(form, check(emailSchema));"
+    assert not DisjointEdits().detect(make(ours, theirs, base=base))
