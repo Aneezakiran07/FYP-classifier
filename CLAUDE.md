@@ -159,8 +159,8 @@ src/classifier/
   pipeline.py        shared: Stages 0 to 5, call ceiling, trace, record writing, resume
   cli.py  report.py  shared
   rules/             Fatima: ast_diff.py, ast_gate.py, patterns/, validators.py
-  llm/               Aneeza: prompts.py, prompt_builder.py, providers.py, parsing.py, classify_llm.py, few_shot.json
-scripts/             build_few_shot.py, make_split.py, make_smoke_input.py, run_funnel.py, and later evaluate.py
+  llm/               Aneeza: prompts.py, prompt_builder.py, providers.py, parsing.py, classify_llm.py, few_shot.json, few_shot_candidates.json
+scripts/             build_few_shot.py, make_split.py, make_smoke_input.py, run_funnel.py, evaluate.py, revalidate.py, compare_funnels.py, explain_disjoint.py
 tests/rules  tests/llm  tests/test_pipeline.py  tests/test_schema.py  tests/test_make_split.py
 docs/                START_HERE.md, PROGRESS.md, TEAM_GUIDE.md, classifier_design_from_report.md, decisions.md
 data/  outputs/      data is mostly gitignored, outputs are never committed
