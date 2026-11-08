@@ -228,16 +228,33 @@ def choose_and_parse(language, ours_text, theirs_text):
     return best[1], best[2], best[3]
 
 
+def is_template_with_substitution(token):
+    # A plain string keeps a placeholder as literal text while a template string inserts the value
+    return token.kind == "string" and token.text.startswith("`") and "${" in token.text
+
+
+def semicolon_guards_next_line(tokens, index):
+    # Without this semicolon a next token of an opening parenthesis, a bracket or a backtick continues the statement above
+    if index + 1 >= len(tokens):
+        return False
+    following = tokens[index + 1].text
+    return following in {"(", "["} or following.startswith("`")
+
+
 def normalized_keys(tokens):
     # Drops semicolons, trailing commas, and quote characters so that pure
     # formatting choices do not count as differences
+    # A semicolon that keeps the next line apart from the statement above is kept
     keys = []
     for index, token in enumerate(tokens):
-        if token.text == ";":
+        if token.text == ";" and not semicolon_guards_next_line(tokens, index):
             continue
         if token.text == "," and index + 1 < len(tokens) and tokens[index + 1].text in CLOSERS:
             continue
-        if token.kind == "string" and len(token.text) >= 2 and token.text[0] in "'\"`":
+        if is_template_with_substitution(token):
+            # A template string inserts values so its backticks stay part of the key
+            keys.append(token.key())
+        elif token.kind == "string" and len(token.text) >= 2 and token.text[0] in "'\"`":
             keys.append(("string", token.text[1:-1]))
         else:
             keys.append(token.key())

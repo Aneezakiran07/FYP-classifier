@@ -1,5 +1,5 @@
 # Stage 3 pattern that labels a region disjoint-edits when both sides changed different parts that do not interact
-# It needs a base and checks that the changed base lines do not overlap, the declared names differ, and neither side uses a name the other defines
+# It needs a base and checks that the changed base lines do not overlap, the declared names differ, and neither side uses a name the other defines or deleted
 # Helper functions find changed lines, strip strings, hide JSX attributes and collect identifiers and declared names
 # The fourth check about a joint use in context lines cannot run because the data has no surrounding lines
 
@@ -41,6 +41,22 @@ _DECLARATION_PATTERNS = [
     re.compile(r"(?<![.\w$])([A-Za-z_$][\w$]*)\??\s*:\s*[^:=]"),
 ]
 
+# A parameter list of a function or an arrow function, the same shape the rename guard reads
+_PARAMETER_LIST = re.compile(r"\bfunction\b[^(]*\(([^()]*)\)|\(([^()]*)\)\s*(?::[^=>{]+)?=>")
+
+# Real local declarations only, a type counts only as a type alias as in the rename guard of D9
+_LOCAL_DECLARATIONS = [
+    re.compile(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)"),
+    re.compile(r"\bfunction\s+([A-Za-z_$][\w$]*)"),
+    re.compile(r"\bclass\s+([A-Za-z_$][\w$]*)"),
+    re.compile(r"\binterface\s+([A-Za-z_$][\w$]*)"),
+    re.compile(r"\btype\s+([A-Za-z_$][\w$]*)\s*[<=]"),
+    re.compile(r"\benum\s+([A-Za-z_$][\w$]*)"),
+]
+
+# An import or export list names bindings of another file or of an export, never a new local declaration
+_MODULE_LIST = re.compile(r"\b(?:import|export)\s+(?:type\s+)?\{[^{}]*\}", re.S)
+
 _KEYWORDS = frozenset({
     "const", "let", "var", "function", "class", "interface", "type", "enum",
     "return", "if", "else", "for", "while", "do", "switch", "case", "default",
@@ -80,6 +96,46 @@ def _changed_line_text(base_lines, side_lines):
     return pieces
 
 
+def _parameter_names(lines):
+    names = set()
+    for match in _PARAMETER_LIST.finditer(_strip_strings("\n".join(lines))):
+        for part in (match.group(1) or match.group(2) or "").split(","):
+            found = re.match(r"\s*(?:\.\.\.)?([A-Za-z_$][\w$]*)", part)
+            if found and found.group(1) not in _KEYWORDS:
+                names.add(found.group(1))
+    return names
+
+
+def _locally_declared(lines, jsx):
+    # Names the side still declares itself, by a declaration keyword or as a parameter
+    # Object keys, assignments and names in import or export lists do not count
+    masked = _MODULE_LIST.sub(" ", _strip_strings("\n".join(lines))).splitlines()
+    names = set()
+    for line in masked:
+        stripped = _mask_jsx(line) if jsx else line
+        for pattern in _LOCAL_DECLARATIONS:
+            for match in pattern.finditer(stripped):
+                if match.group(1) not in _KEYWORDS:
+                    names.add(match.group(1))
+    return names | _parameter_names(masked)
+
+
+def _deleted_names(base_lines, side_lines, jsx):
+    # Names declared on base lines the side deleted or replaced that the side no longer declares anywhere
+    removed = _declared_names(_removed_base_lines(base_lines, side_lines), jsx)
+    return removed - _locally_declared(side_lines, jsx)
+
+
+def _removed_base_lines(base_lines, side_lines):
+    # Base lines that a side deleted or replaced, an insertion removes none
+    matcher = difflib.SequenceMatcher(None, base_lines, side_lines, autojunk=False)
+    pieces = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag in ("replace", "delete"):
+            pieces.extend(base_lines[i1:i2])
+    return pieces
+
+
 def _strip_strings(text):
     return _STRING.sub(" ", text)
 
@@ -115,7 +171,7 @@ class DisjointEdits(PatternPlugin):
     # conditions, all of which must hold:
     #   1. changed-line sets do not overlap
     #   2. names each side declares or assigns are disjoint
-    #   3. neither side's changed lines reference a name the other defines
+    #   3. neither side's changed lines reference a name the other defines or deleted
     #   4. no unchanged line in the context window uses names from both
     #
     # Condition 4 cannot be checked here, because the input region does
@@ -177,6 +233,16 @@ class DisjointEdits(PatternPlugin):
         if ours_referenced & theirs_declared:
             return False
         if theirs_referenced & ours_declared:
+            return False
+
+        # A name declared on a base line that one side deleted or replaced
+        # must not be used by the changed lines of the other side
+        ours_removed = _deleted_names(base_lines, ours_lines, jsx)
+        theirs_removed = _deleted_names(base_lines, theirs_lines, jsx)
+
+        if ours_referenced & theirs_removed:
+            return False
+        if theirs_referenced & ours_removed:
             return False
 
         return True

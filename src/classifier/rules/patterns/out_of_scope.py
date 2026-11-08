@@ -1,5 +1,5 @@
 # Stage 0 pattern that labels files outside the project scope as unknown with the reason out-of-scope
-# It matches built, generated or vendored folders such as dist, build, node_modules and snapshots, plus minified, map and snap files
+# It matches built, generated or vendored folders such as dist, build, node_modules, generated and snapshots, plus minified, map, snap and gen.ts files
 # It also rejects any file that is not TypeScript, prose, a lockfile, package.json, declarative config or a JavaScript config file
 # It runs first of all patterns so nothing else can claim a region inside such a file
 
@@ -30,6 +30,10 @@ OUT_OF_SCOPE_DIRS = {
     "vendor",
 }
 
+# Folders and file names of generated TypeScript such as routeTree.gen.ts, added by D14
+GENERATED_DIRS = {"__generated__", "generated"}
+GENERATED_SUFFIXES = (".gen.ts", ".gen.tsx")
+
 
 # The report scopes to TypeScript and these match the conflict file definition in the decisions log
 TYPESCRIPT_EXTENSIONS = (".ts", ".tsx")
@@ -43,6 +47,14 @@ def _segments(path):
     # path and a leading "./" behave the same as a plain relative path.
     normalized = (path or "").replace("\\", "/").lower()
     return [part for part in normalized.split("/") if part and part != "."]
+
+
+def is_generated_path(path):
+    # True for a generated TypeScript file by its folder or its file name
+    parts = _segments(path)
+    if not parts:
+        return False
+    return any(segment in GENERATED_DIRS for segment in parts[:-1]) or parts[-1].endswith(GENERATED_SUFFIXES)
 
 
 def _is_out_of_scope(path):
@@ -65,6 +77,8 @@ def _is_out_of_scope(path):
     if name.endswith(".map"):
         return True
     if name.endswith(".snap"):
+        return True
+    if is_generated_path(path):
         return True
     return False
 

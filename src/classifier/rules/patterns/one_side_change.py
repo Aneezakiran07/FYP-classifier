@@ -107,13 +107,16 @@ class OneSideChange(PatternPlugin):
     # differs from base only by those three things counts as untouched.
     # Parentheses and braces are not normalized. Needs diff3, without base
     # this pattern never runs and the region goes on to the model instead.
+    # An empty base is a real base, so a side that stayed blank did not change
+    # The registry treats an empty base as no base, so the pattern asks for both
+    # and checks for a missing base itself
     name = "OneSideChange"
     priority = 20
-    requires = "diff3"
+    requires = "both"
     precedence_rule = 2
 
     def detect(self, h: ClassifyInput) -> bool:
-        if not h.base_text:
+        if h.base_text is None:
             return False
         formatting = _formatting_applies(
             h.file_path, (h.base_text, h.ours_text, h.theirs_text)

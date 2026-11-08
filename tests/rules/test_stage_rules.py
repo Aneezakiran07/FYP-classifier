@@ -148,3 +148,23 @@ def test_scope_runs_before_the_no_marker_check():
     region = {"no_markers": True, "conflict_type": "deleted_by_us"}
     _, _, detail = decide("src/a.css", "", "", None, region)
     assert detail == "OutOfScope"
+
+
+@pytest.mark.parametrize("path", [
+    "src/routeTree.gen.ts", "packages/api/sdk.gen.ts", "src/view.gen.tsx",
+    "src/__generated__/graphql.ts", "packages/client/generated/models.ts",
+])
+def test_generated_typescript_files_are_out_of_scope(path):
+    # C2 from the review, generated TypeScript is out of scope at Stage 0
+    result, _, detail = decide(path, "const a = 1;", "const a = 2;", "const a = 0;")
+    assert detail == "OutOfScope"
+    assert result["label"] == "unknown" and result["unknown_reason"] == "out-of-scope"
+
+
+@pytest.mark.parametrize("path", [
+    "src/generator.ts", "src/gen.ts", "src/generated.ts", "src/regenerated/a.ts", "src/agent.ts",
+])
+def test_names_that_only_look_generated_stay_in_scope(path):
+    # Only the gen file suffix and a whole generated folder name count
+    _, _, detail = decide(path, "const a = 1;", "const a = 2;", "const a = 0;")
+    assert detail != "OutOfScope"

@@ -89,3 +89,37 @@ def test_identical_text_is_identical():
 def test_patterns_still_run_before_the_gate():
     result, layer, detail = pipeline.classify_region("package-lock.json", "a", "b")
     assert layer == "pattern" and detail == "Lockfile"
+
+
+def test_a_template_string_with_a_substitution_is_not_a_plain_string():
+    # A1 from the review, a plain string keeps the placeholder as text while a template string inserts the value
+    ours, theirs = 'const s = "Hi ${name}";', "const s = `Hi ${name}`;"
+    assert compute_ast_equivalence("src/a.ts", ours, theirs).equivalence == "content_changed"
+    result, layer, detail = pipeline.classify_region("src/a.ts", ours, theirs, allow_llm=False)
+    assert result is None and layer is None
+
+
+def test_a_template_string_with_no_substitution_is_still_formatting():
+    # Without a placeholder the template string holds the same text as the plain string
+    assert compute_ast_equivalence("src/a.ts", 'const s = "Hi";', "const s = `Hi`;").equivalence == "formatting_only"
+
+
+def test_a_semicolon_before_a_parenthesis_line_is_kept():
+    # A2 from the review, without the semicolon theirs calls y with the next line as its argument
+    ours, theirs = "x = y;\n(z || w).run();", "x = y\n(z || w).run();"
+    assert compute_ast_equivalence("src/a.ts", ours, theirs).equivalence == "content_changed"
+    result, layer, detail = pipeline.classify_region("src/a.ts", ours, theirs, allow_llm=False)
+    assert result is None and layer is None
+
+
+@pytest.mark.parametrize("next_line", ["[a, b].forEach(run);", "`x`.trim();"])
+def test_a_semicolon_before_a_bracket_or_template_line_is_kept(next_line):
+    # A next line that starts with a bracket or a backtick also continues the line above
+    ours, theirs = "x = y;\n" + next_line, "x = y\n" + next_line
+    assert compute_ast_equivalence("src/a.ts", ours, theirs).equivalence == "content_changed"
+
+
+def test_a_semicolon_before_an_ordinary_line_is_still_formatting():
+    # A next line that starts with a name cannot join the line above
+    ours, theirs = "x = y;\nz.run();", "x = y\nz.run();"
+    assert compute_ast_equivalence("src/a.ts", ours, theirs).equivalence == "formatting_only"
