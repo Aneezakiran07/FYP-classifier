@@ -1,0 +1,388 @@
+[
+  {
+    "file_path": "store/chat/index.ts",
+    "base": "export const createChatSlice = (\n  set: (fn: (state: ChatSliceState) => void) => void,\n  get: () => ChatSliceState\n): ChatSlice => {\n  // \u30a2\u30af\u30b7\u30e7\u30f3\u3092\u4f5c\u6210\n  const actions = createChatActions(set, get)\n\n  // \u72b6\u614b\u3068\u30a2\u30af\u30b7\u30e7\u30f3\u3092\u7d44\u307f\u5408\u308f\u305b\u305f\u30b9\u30e9\u30a4\u30b9\u3092\u8fd4\u3059\n  return {\n    ...initialChatState,\n    ...actions",
+    "ours": "export const createChatSlice = createSlice<ChatSliceState, ChatSliceActions>(\n  (set, get) => {\n    const actions = createChatActions(set, get)\n    return {\n      ...initialChatState,\n      ...actions\n    }",
+    "theirs": "export const createChatSlice = (\n  set: (fn: (state: ChatSliceState) => void) => void,\n  get: () => ChatSliceState,\n  deps: ChatActionDeps\n): ChatSlice => {\n  // \u30a2\u30af\u30b7\u30e7\u30f3\u3092\u4f5c\u6210\n  const actions = createChatActions(set, get, deps)\n\n  // \u72b6\u614b\u3068\u30a2\u30af\u30b7\u30e7\u30f3\u3092\u7d44\u307f\u5408\u308f\u305b\u305f\u30b9\u30e9\u30a4\u30b9\u3092\u8fd4\u3059\n  return {\n    ...initialChatState,\n    ...actions",
+    "ast_equivalence": {
+      "equivalence": "content_changed",
+      "renames": {},
+      "changed_nodes": [
+        "code_replaced:createSlice <\u2192( set : ( fn : ( state : ChatSliceState ) => void ) => void , get : ( ) =>",
+        "code_replaced:ChatSliceActions > ( ( set , get\u2192deps : ChatActionDeps",
+        "code_added:\u2192: ChatSlice",
+        "code_added:\u2192, deps",
+        "punctuation_removed:}\u2192"
+      ]
+    },
+    "true_label": "type-incompatibility",
+    "notes": "theirs adds a deps parameter and passes it to createChatActions while ours rewrites the factory and calls createChatActions without it",
+    "test_answers": [
+      {
+        "test_id": "null-safety-conflict",
+        "met": false,
+        "evidence": "no null marker added, removed or guarded on either side"
+      },
+      {
+        "test_id": "type-incompatibility",
+        "met": true,
+        "evidence": "theirs adds `deps: ChatActionDeps` and calls `createChatActions(set, get, deps)`; ours still calls `createChatActions(set, get)`"
+      },
+      {
+        "test_id": "execution-perturbation",
+        "met": false,
+        "evidence": "neither side adds or changes a return, throw or branch condition"
+      },
+      {
+        "test_id": "overlap-contamination",
+        "met": false,
+        "evidence": "changes are to one function's signature and call, not members of an entity"
+      },
+      {
+        "test_id": "assignment-override",
+        "met": false,
+        "evidence": "theirs changes both the parameter list and a call argument, not one value"
+      },
+      {
+        "test_id": "confluent-interference",
+        "met": false,
+        "evidence": "no second changed entity and no line reading two entities together"
+      },
+      {
+        "test_id": "business-logic-conflict",
+        "met": false,
+        "evidence": "residual test, and test 2 is met"
+      }
+    ]
+  },
+  {
+    "file_path": "src/app/services/device.service.ts",
+    "base": "    if (isPlatformBrowser(this.platformId)) {\n      return this.mobileRegex.test(navigator.userAgent);\n    }\n    return false;",
+    "ours": "    if (!this.isBrowser) {\n      return false;\n    }\n    return this.mobileRegex.test(navigator.userAgent);\n",
+    "theirs": "    return this.mobileRegex.test(navigator.userAgent);",
+    "ast_equivalence": {
+      "equivalence": "content_changed",
+      "renames": {},
+      "changed_nodes": [
+        "code_removed:if ( ! this . isBrowser ) { return false ; }\u2192"
+      ]
+    },
+    "true_label": "execution-perturbation",
+    "notes": "ours keeps an early return false for non browser use while theirs drops it and uses navigator unguarded, so the early return skips the other side's code, and the guard is a platform check not a null marker",
+    "test_answers": [
+      {
+        "test_id": "null-safety-conflict",
+        "met": false,
+        "evidence": "isBrowser check is a platform flag, not a null marker"
+      },
+      {
+        "test_id": "type-incompatibility",
+        "met": false,
+        "evidence": "no function or type signature changes on either side"
+      },
+      {
+        "test_id": "execution-perturbation",
+        "met": true,
+        "evidence": "ours `if (!this.isBrowser) {` returns early with `return false;`, so theirs' unguarded `return this.mobileRegex.test(navigator.userAgent);` never runs on that path"
+      },
+      {
+        "test_id": "overlap-contamination",
+        "met": false,
+        "evidence": "both edit one method body, not members of an object or class"
+      },
+      {
+        "test_id": "assignment-override",
+        "met": false,
+        "evidence": "the changed part is control flow, not one target's value"
+      },
+      {
+        "test_id": "confluent-interference",
+        "met": false,
+        "evidence": "no second entity changed and no joint-reading line visible"
+      },
+      {
+        "test_id": "business-logic-conflict",
+        "met": false,
+        "evidence": "residual test, and test 3 is met"
+      }
+    ]
+  },
+  {
+    "file_path": "tura-wallet/src/lib/wallet_manager.ts",
+    "base": "        createdAt: new Date().toISOString()",
+    "ours": "        privateKey: account.privateKey,\n        mnemonic: mnemonic,\n        createdAt: new Date().toISOString()",
+    "theirs": "        createdAt: new Date().toISOString(),\n        mnemonic: wallet.mnemonic?.phrase",
+    "ast_equivalence": {
+      "equivalence": "content_changed",
+      "renames": {},
+      "changed_nodes": [
+        "code_removed:privateKey : account . privateKey , mnemonic : mnemonic ,\u2192",
+        "code_added:\u2192, mnemonic : wallet . mnemonic ?. phrase"
+      ]
+    },
+    "true_label": "overlap-contamination",
+    "notes": "both add a mnemonic member to the same wallet record with different values and ours also adds privateKey, so they compete over mnemonic and differ in another member",
+    "test_answers": [
+      {
+        "test_id": "null-safety-conflict",
+        "met": false,
+        "evidence": "theirs guards wallet.mnemonic, ours uses a separate mnemonic variable"
+      },
+      {
+        "test_id": "type-incompatibility",
+        "met": false,
+        "evidence": "no function or type signature changes"
+      },
+      {
+        "test_id": "execution-perturbation",
+        "met": false,
+        "evidence": "no return, throw, break, continue or branch condition changes"
+      },
+      {
+        "test_id": "overlap-contamination",
+        "met": true,
+        "evidence": "both add a mnemonic member, `mnemonic: mnemonic,` versus `mnemonic: wallet.mnemonic?.phrase`, and ours also adds `privateKey: account.privateKey,`"
+      },
+      {
+        "test_id": "assignment-override",
+        "met": false,
+        "evidence": "ours also adds privateKey, so the sides differ in more than one member"
+      },
+      {
+        "test_id": "confluent-interference",
+        "met": false,
+        "evidence": "no line reading two changed entities together is visible"
+      },
+      {
+        "test_id": "business-logic-conflict",
+        "met": false,
+        "evidence": "residual test, and test 4 is met"
+      }
+    ]
+  },
+  {
+    "file_path": "src/i18n.ts",
+    "base": "",
+    "ours": "import i18n from 'i18next';\nimport { initReactI18next } from 'react-i18next';\nimport en from './locales/en.json';\nimport id from './locales/id.json';\n\nconst savedLang = typeof window !== 'undefined' ? localStorage.getItem('lang') : null;\n\ni18n.use(initReactI18next).init({\n  resources: {\n    en: { translation: en },\n    id: { translation: id },\n  },\n  lng: savedLang || 'id',\n  fallbackLng: 'en',\n  interpolation: { escapeValue: false },\n});\n\nexport default i18n;",
+    "theirs": "import i18n from 'i18next';\nimport { initReactI18next } from 'react-i18next';\nimport en from './locales/en.json';\nimport id from './locales/id.json';\n\nconst resources = {\n  en: { translation: en },\n  id: { translation: id },\n};\n\ni18n\n  .use(initReactI18next)\n  .init({\n    resources,\n    lng: localStorage.getItem('lng') || 'id',\n    fallbackLng: 'id',\n    interpolation: { escapeValue: false },\n  });\n\nexport default i18n;",
+    "ast_equivalence": {
+      "equivalence": "content_changed",
+      "renames": {},
+      "changed_nodes": [
+        "identifier_changed:savedLang\u2192resources",
+        "code_removed:typeof window !== 'undefined' ? localStorage . getItem ( 'lang' ) : null ; i18n . use ( initReactI18next ) . init ( { re...\u2192",
+        "code_added:\u2192; i18n . use ( initReactI18next ) . init ( { resources",
+        "code_replaced:savedLang\u2192localStorage . getItem ( 'lng' )",
+        "string_literal_changed:'en'\u2192'id'"
+      ]
+    },
+    "true_label": "overlap-contamination",
+    "notes": "both add the same i18n setup on an empty base, competing over lng and its storage key and also differing in fallbackLng",
+    "test_answers": [
+      {
+        "test_id": "null-safety-conflict",
+        "met": false,
+        "evidence": "ours guards window, theirs reads localStorage, not the same name"
+      },
+      {
+        "test_id": "type-incompatibility",
+        "met": false,
+        "evidence": "no function or type signature changes"
+      },
+      {
+        "test_id": "execution-perturbation",
+        "met": false,
+        "evidence": "the window check picks a value, it does not skip code"
+      },
+      {
+        "test_id": "overlap-contamination",
+        "met": true,
+        "evidence": "both configure the same `i18n` init, competing over `lng: savedLang || 'id',` versus `lng: localStorage.getItem('lng') || 'id',` and differing in `fallbackLng: 'en',`"
+      },
+      {
+        "test_id": "assignment-override",
+        "met": false,
+        "evidence": "the sides also differ in fallbackLng and the storage key"
+      },
+      {
+        "test_id": "confluent-interference",
+        "met": false,
+        "evidence": "no line reading two changed entities together is visible"
+      },
+      {
+        "test_id": "business-logic-conflict",
+        "met": false,
+        "evidence": "residual test, and test 4 is met"
+      }
+    ]
+  },
+  {
+    "file_path": "app/generate-contract/loading.tsx",
+    "base": "",
+    "ours": "import Loading from \"../loading\"\nexport default Loading",
+    "theirs": "import { Loader2 } from \"lucide-react\"\n\nexport default function Loading() {\n  return (\n    <div className=\"flex justify-center items-center min-h-screen\">\n      <Loader2 className=\"h-6 w-6 animate-spin text-primary\" />\n      <p className=\"ml-2 text-sm\">Preparing form...</p>\n    </div>\n  )\n}",
+    "ast_equivalence": {
+      "equivalence": "content_changed",
+      "renames": {},
+      "changed_nodes": [
+        "code_replaced:Loading\u2192{ Loader2 }",
+        "import_path_changed:\"../loading\"\u2192\"lucide-react\"",
+        "code_added:\u2192function",
+        "code_added:\u2192( ) { return ( < div className = \"flex justify-center items-center min-h-screen\" > < Loader2 className = \"h-6 w-6 animat..."
+      ]
+    },
+    "true_label": "assignment-override",
+    "notes": "both add the loading page on an empty base, ours re exports the shared Loading and theirs defines its own spinner, so only one default export can survive",
+    "test_answers": [
+      {
+        "test_id": "null-safety-conflict",
+        "met": false,
+        "evidence": "no null marker is added, removed or guarded"
+      },
+      {
+        "test_id": "type-incompatibility",
+        "met": false,
+        "evidence": "both files are new, no existing signature changes"
+      },
+      {
+        "test_id": "execution-perturbation",
+        "met": false,
+        "evidence": "the return in theirs is a new component body, nothing is skipped"
+      },
+      {
+        "test_id": "overlap-contamination",
+        "met": false,
+        "evidence": "the default export is one target, not several members of an entity"
+      },
+      {
+        "test_id": "assignment-override",
+        "met": true,
+        "evidence": "both give the default export a different value, `export default Loading` versus `export default function Loading() {`"
+      },
+      {
+        "test_id": "confluent-interference",
+        "met": false,
+        "evidence": "no line reading two changed entities together is visible"
+      },
+      {
+        "test_id": "business-logic-conflict",
+        "met": false,
+        "evidence": "residual test, and test 5 is met"
+      }
+    ]
+  },
+  {
+    "file_path": "packages/blac/src/Blac.ts",
+    "base": "    // Fix: Find the specific bloc by ID within the isolated array\n    const found = blocs.find((b) => b._id === id) as InstanceType<B> | undefined;\n    return found;",
+    "ours": "    // Find the specific bloc by ID within the isolated array\n    const found = blocs.find((b) => b._id === id && !(b as any).isDisposed) as\n      | InstanceType<B>\n      | undefined;\n    return found;",
+    "theirs": "    return blocMap.get(id) as InstanceType<B> | undefined;",
+    "ast_equivalence": {
+      "equivalence": "content_changed",
+      "renames": {},
+      "changed_nodes": [
+        "code_replaced:const found = blocs\u2192return blocMap",
+        "identifier_changed:find\u2192get",
+        "code_removed:( b ) => b . _id ===\u2192",
+        "code_removed:&& ! ( b as any ) . isDisposed\u2192",
+        "code_removed:|\u2192",
+        "code_removed:return found ;\u2192"
+      ]
+    },
+    "true_label": "business-logic-conflict",
+    "notes": "ours adds an isDisposed filter to the array lookup while theirs replaces the lookup with a map get, so one side removes code the other modified",
+    "test_answers": [
+      {
+        "test_id": "null-safety-conflict",
+        "met": false,
+        "evidence": "both sides keep undefined in the cast, nullability is unchanged"
+      },
+      {
+        "test_id": "type-incompatibility",
+        "met": false,
+        "evidence": "no function or type signature changes"
+      },
+      {
+        "test_id": "execution-perturbation",
+        "met": false,
+        "evidence": "theirs replaces the lookup outright, it adds no guard that skips ours"
+      },
+      {
+        "test_id": "overlap-contamination",
+        "met": false,
+        "evidence": "the lookup is one local statement, not members of an object or class"
+      },
+      {
+        "test_id": "assignment-override",
+        "met": false,
+        "evidence": "theirs drops found, so no single target gets two different values"
+      },
+      {
+        "test_id": "confluent-interference",
+        "met": false,
+        "evidence": "no line reading two changed entities together is visible"
+      },
+      {
+        "test_id": "business-logic-conflict",
+        "met": true,
+        "evidence": "ours modifies `blocs.find((b) => b._id === id && !(b as any).isDisposed)` while theirs replaces the lookup with `return blocMap.get(id) as InstanceType<B> | undefined;`"
+      }
+    ]
+  },
+  {
+    "file_path": "src/core/comparator.ts",
+    "base": "  for (const pathKey of Object.keys(prodPages)) {",
+    "ours": "  const concurrency = options.concurrency ?? os.cpus().length;\n  const limit = pLimit(concurrency);\n\n  const paths = allPaths ?? [...new Set([...Object.keys(prodPages), ...Object.keys(testPages)])];\n\n  await Promise.all(paths.map(pathKey => limit(async () => {",
+    "theirs": "  const keys = Object.keys(prodPages);\n\n  await Promise.all(keys.map(async pathKey => {",
+    "ast_equivalence": {
+      "equivalence": "content_changed",
+      "renames": {},
+      "changed_nodes": [
+        "identifier_changed:concurrency\u2192keys",
+        "code_removed:options . concurrency ?? os . cpus ( ) . length ; const limit = pLimit ( concurrency ) ; const paths = allPaths ?? [ ......\u2192",
+        "code_removed:, ... Object . keys ( testPages ) ] ) ]\u2192",
+        "identifier_changed:paths\u2192keys",
+        "code_added:\u2192async",
+        "code_removed:limit ( async ( ) =>\u2192"
+      ]
+    },
+    "true_label": "business-logic-conflict",
+    "notes": "both turn the serial page loop into Promise.all, ours with a concurrency limit over the union of prod and test paths and theirs over prod keys only",
+    "test_answers": [
+      {
+        "test_id": "null-safety-conflict",
+        "met": false,
+        "evidence": "ours adds ?? defaults on names theirs never uses"
+      },
+      {
+        "test_id": "type-incompatibility",
+        "met": false,
+        "evidence": "no function or type signature changes"
+      },
+      {
+        "test_id": "execution-perturbation",
+        "met": false,
+        "evidence": "both replace the loop, neither adds an exit that skips the other's code"
+      },
+      {
+        "test_id": "overlap-contamination",
+        "met": false,
+        "evidence": "the setup is local statements, not members of one entity"
+      },
+      {
+        "test_id": "assignment-override",
+        "met": false,
+        "evidence": "the sides declare different names across several statements, not one target"
+      },
+      {
+        "test_id": "confluent-interference",
+        "met": false,
+        "evidence": "no line reading two changed entities together is visible"
+      },
+      {
+        "test_id": "business-logic-conflict",
+        "met": true,
+        "evidence": "ours iterates `paths.map(pathKey => limit(async () => {` with `pLimit(concurrency)` while theirs iterates `keys.map(async pathKey => {`, different multi statement logic"
+      }
+    ]
+  }
+]
