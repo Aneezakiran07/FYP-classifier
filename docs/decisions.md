@@ -486,3 +486,30 @@ Marker regions by stage:
 ### For Aneeza to look at
 - The stage order choice in B1, and whether the `generated` folder name is too wide (it also covers non TypeScript files in such a folder, which Stage 0 already sends out of scope unless they are config or prose).
 - DisjointEdits on an empty base (dev region 27) is still open and waits for both of us.
+
+## D15. Logic prompt v2 and the first few shot test (2026-11-08)
+Aneeza's area (`src/classifier/llm/`). This file is shared, so Fatima should review this entry.
+
+### logic-v2, changes to the logic tests prompt
+- **Targets.** A target now includes a JSX child expression and a parameter or return type annotation.
+- **Test 4.** A type annotation on one target is the declared type of that target and belongs to test 5, even when it lists several members.
+- **Test 7 follows D12.** A differing literal counts only when it sits in a condition or code compares against it. Display text, a log message or a label never meets test 7. If one side's result is the other side's result plus extra code, test 7 is not met.
+- The router prompt is unchanged and stays `router-v1`.
+
+### Results on batch 1, GPT-6 Luna (`hackclub-classify`)
+| Prompt | Correct | Model part |
+|---|---|---|
+| logic-v1 | 14/30 | 13/29 |
+| logic-v2 | 16/30 | 15/29 |
+
+- The prompt was tuned and scored on the same regions, so the gain is optimistic and within noise. Batch 3 is the honest check.
+- 8 of the 29 regions that reach the model have a rule only label (value-only-change, disjoint-edits, import-restructure), which the model cannot write.
+
+### Few shot examples, kept off
+- 7 examples were built from the reviewed batch 2 (regions 33, 44, 50, 51 and 53) plus dev regions 17 and 9 from batch 1. Region 46 was left out as a near copy of 44.
+- With them, batch 1 scored 14/28 against 15/28 without them, on the same 28 regions, and the input tokens tripled.
+- They are kept in `few_shot_candidates.json`. `few_shot.json` is empty, so the prompt text and its hash are the same as logic-v2. They stay off until batch 3 can test them.
+
+### For Fatima to look at
+- The assignment-override validator rejects a correct answer on a JSX child (dev region 23) and on a return type annotation (dev region 25), because it only reads `name =` and `name:` lines.
+- A quote that holds a template string, with backticks inside backticks, is split wrongly (dev region 12).
