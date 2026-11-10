@@ -1,11 +1,13 @@
 # Tests for the validators using small made up regions
 # They check quoted evidence must appear in the region, layout is ignored, base text and AST change names count and invented quotes fail
-# They check that each logic test check passes and fails on the right regions, from null safety to assignment override
+# They check that each logic test check passes and fails on the right regions, including JSX children, return types and nested backticks
 # They check that confluent interference and unknown test ids always fail and that a structural hint is never confirmed yet
 
 # tests for the validators with small made up regions
 
 from types import SimpleNamespace
+
+import pytest
 
 from classifier.rules.validators import (
     check_assignment_override,
@@ -18,6 +20,10 @@ from classifier.rules.validators import (
 
 def make_region(ours="", theirs="", base=""):
     return SimpleNamespace(file_path="src/a.ts", ours_text=ours, theirs_text=theirs, base_text=base)
+
+
+def make_tsx_region(ours="", theirs="", base=""):
+    return SimpleNamespace(file_path="src/a.tsx", ours_text=ours, theirs_text=theirs, base_text=base)
 
 
 def test_quote_found_in_ours_is_real():
@@ -155,3 +161,88 @@ def test_assignment_override_fails_when_targets_differ():
 
 def test_structural_hint_is_never_confirmed_yet():
     assert confirm_structural(make_region("a", "b"), "whitespace_only") is None
+
+def test_assignment_override_passes_when_a_jsx_child_gets_two_expressions():
+    # Dev region 23, the same text slot holds currentYear on one side and a new date call on the other
+    region = make_tsx_region(
+        ours="          © {currentYear} Sentiment Hound. All rights reserved.",
+        theirs="          © {new Date().getFullYear()} Sentiment Hound. All rights reserved.",
+        base="          © 2020 mantine.dev. All rights reserved.",
+    )
+    assert check_assignment_override(region)
+
+
+def test_assignment_override_fails_when_the_text_around_a_jsx_child_differs():
+    # Different surrounding text means the two expressions are not in the same slot
+    region = make_tsx_region(ours="<p>Hello {name}</p>", theirs="<p>Goodbye {user.name}</p>")
+    assert not check_assignment_override(region)
+
+
+def test_assignment_override_fails_when_a_jsx_child_is_the_same():
+    region = make_tsx_region(ours="<p>Hello {name}</p>", theirs="<p>Hello {name}</p>")
+    assert not check_assignment_override(region)
+
+
+def test_assignment_override_passes_when_a_return_type_annotation_differs():
+    # Dev region 25, the same method gets two different return type annotations
+    region = make_region(
+        ours="  private calculateNetworkMetrics(issues: PerformanceIssue[]): { requestCount: number; bundleImpact: number; cacheability: number } {",
+        theirs="  private calculateNetworkMetrics(issues: PerformanceIssue[]): { requestCount: number; bundleSize: number; latencyRisk: number } {",
+        base="  private calculateNetworkMetrics(issues: PerformanceIssue[]): any {",
+    )
+    assert check_assignment_override(region)
+
+
+def test_assignment_override_passes_when_an_arrow_function_return_type_differs():
+    region = make_region(ours="const load = async (): Promise<User> => {",
+                         theirs="const load = async (): Promise<Account> => {")
+    assert check_assignment_override(region)
+
+
+def test_assignment_override_fails_when_return_types_belong_to_different_functions():
+    # The parameters have different names so only the return type check is tested here
+    region = make_region(ours="function load(a: string): User {", theirs="function save(b: string): Account {")
+    assert not check_assignment_override(region)
+
+
+def test_assignment_override_fails_when_a_return_type_is_the_same():
+    region = make_region(ours="function load(): User {", theirs="function load():  User {")
+    assert not check_assignment_override(region)
+
+
+def test_a_quote_holding_a_template_string_is_read_whole():
+    # Dev region 12, backticks inside the quoted code must not end the quote early
+    region = make_region(
+        ours="if (isBrotli) {\n  uploadPathUnix = `${filePathUnix}.br`\n}",
+        theirs="const filePathWithExtension = compressed ? `${filePathUnixSafe}.br` : filePathUnixSafe",
+    )
+    evidence = ("ours sets `uploadPathUnix = `${filePathUnix}.br`` inside `if (isBrotli) {`, "
+                "theirs uses `compressed ? `${filePathUnixSafe}.br` : filePathUnixSafe`")
+    assert evidence_is_real(region, evidence)
+
+
+def test_an_invented_quote_still_fails_next_to_a_template_string():
+    region = make_region(ours="uploadPathUnix = `${filePathUnix}.br`")
+    assert not evidence_is_real(region, "ours sets `uploadPathUnix = `${filePathUnix}.br`` and `invented line`")
+
+
+def test_prose_between_two_quotes_is_never_read_as_a_quote():
+    # Two plain quotes with a word between them that is not in the region
+    region = make_region(ours="const a = 1;", theirs="const a = 2;")
+    assert evidence_is_real(region, "ours `const a = 1;` against theirs `const a = 2;`")
+
+
+@pytest.mark.parametrize("ours, theirs", [
+    ("if (a) { foo() }", "if (a) { bar() }"),
+    ("class A { run() { go() } }", "class A { run() { stop() } }"),
+    ("items.map(x => { run(x) })", "items.map(x => { stop(x) })"),
+    ("else { a() }", "else { b() }"),
+])
+def test_a_code_block_is_not_a_jsx_child(ours, theirs):
+    # A brace after a condition, an arrow or a keyword opens code, not a JSX child
+    assert not check_assignment_override(make_tsx_region(ours=ours, theirs=theirs))
+
+
+def test_a_jsx_child_counts_only_in_a_jsx_file():
+    region = make_region(ours="<p>Hello {name}</p>", theirs="<p>Hello {user.name}</p>")
+    assert not check_assignment_override(region)

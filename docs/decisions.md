@@ -513,3 +513,28 @@ Aneeza's area (`src/classifier/llm/`). This file is shared, so Fatima should rev
 ### For Fatima to look at
 - The assignment-override validator rejects a correct answer on a JSX child (dev region 23) and on a return type annotation (dev region 25), because it only reads `name =` and `name:` lines.
 - A quote that holds a template string, with backticks inside backticks, is split wrongly (dev region 12).
+
+## D16. Validator gaps from D15 (2026-11-10)
+
+Fatima's area (`src/classifier/rules/validators.py`). Built from batch 1 dev regions 12, 23 and 25 only. Batch 3 and the test split sheets were not opened.
+
+### What changed
+- **JSX child as an assignment-override target (dev region 23).** In a `.tsx` or `.jsx` file, a line whose text matches on both sides once every brace expression is emptied, and whose brace expressions differ, counts as one target with two values. `© {currentYear} ...` against `© {new Date().getFullYear()} ...` now passes.
+- **Return type annotation as a target (dev region 25).** The same function name with a different return type annotation counts as one target with two values. This covers methods, function declarations and arrow functions bound to a name.
+- **Nested backticks in a quote (dev region 12).** A backtick quote now ends at the last backtick that still gives text found in the region, so a quote that holds a template string is read whole. Prose between two quotes is never read as a quote, and every quote must still be real. Double quotes are still read only when there are no backticks.
+
+### Choices made, for Aneeza to check
+- A brace counts as a JSX child only in a `.tsx` or `.jsx` file, and not after `=`, `(`, `)`, `,`, `:`, `[`, `?`, an operator or `=>`, not after a code keyword such as `else`, `try` or `return`, and not on a line that starts with one such as `if`, `class` or `const`. So a code block like `if (a) { foo() }` against `if (a) { bar() }` is not a target.
+- A JSX child line must hold the same surrounding text on both sides. `Hello {name}` against `Goodbye {user.name}` is not one slot.
+- `quoted_pieces` is unchanged, because `scripts/build_few_shot.py` still uses it. It still splits a nested backtick quote the old way, so the few shot builder may reject such an example. Aneeza can switch it to the new reading if she wants.
+
+### Known limits
+- A function whose parameters hold parentheses, such as a callback type, is not read for its return type.
+- A ternary such as `ok ? load(a) : b` can be read as a return type of `load`. This only adds a target, and the model's evidence must still be real.
+- The old `name:` and `name =` check reads a parameter like `id: string): User {` as one long value, so two different functions with the same parameter name already count as one target. This is older than D16 and was not changed.
+- Aneeza's other ideas from the handover (null guards such as `if (!x)`, a minimum quote length, checking AST change names against the verdict) are not in D16.
+
+### Tests
+- 15 new tests in `tests/rules/test_validators.py`, none edited. The three from regions 12, 23 and 25 failed before the fix. The rest guard against going too far.
+- `tests/rules` 171, `tests/llm` 56, `tests/test_pipeline.py` 47, all tests 328.
+- These changes apply to the full run for free with `scripts/revalidate.py`, because the model answers are saved in the records.
