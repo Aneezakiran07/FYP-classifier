@@ -55,6 +55,19 @@ Last updated: 2026-11-08. Update this file whenever a task changes state. `docs/
 
 No code in `src/` changes on Aneeza's machine until the run ends, because each daily restart loads the code again. Rule and validator fixes are applied after the run with `scripts/revalidate.py`.
 
+### Split of the run, from 2026-11-11
+
+The run is shared so it ends sooner, each half on its own Hack Club key. Both halves use the same code (`2d0ab73`), model, prompts and flags. The split is by whole pull request rows of `final_dataset.jsonl`, never by region, so the keys and the per file call ceiling stay the same. When the split was made, rows 0 to 946 were done (9,853 records), and 10,720 model regions were left.
+
+| Who | Input file | Rows | Model regions left | Output | `Get-FileHash` of the input |
+|---|---|---|---|---|---|
+| Aneeza | `outputs/full/input_aneeza.jsonl` | 0 to 2642, `24taro/notebooklm-collector#243` to `SwellPatrol/meditation.surf#149` | about 5,360 | `outputs/full/luna_v2.jsonl`, resumed | `BA4392A7B5338C5C57D524B13F634E66ACD9731C588586933AC7E5C0A5B90C5B` |
+| Fatima | `outputs/full/input_fatima.jsonl` | 2643 to 4118, `SwellPatrol/meditation.surf#150` to `zxvxl/pet#52` | about 5,360 | `outputs/full/luna_v2_fatima.jsonl`, new | `55AD39BEC78E99E42C3C2727AC74F1E501B7F0884845ACCC19F1648690DBABE2` |
+
+- Both input files are exact line copies of `final_dataset.jsonl` (hash `4E5DC859A66F089A8F70778EB28A152DA73C06900EB5C1A50C65C9D27B187F14`), and joined in order they are byte identical to it.
+- Fatima runs from a folder with no rule changes until her half ends.
+- After both halves end: check that no key is in both outputs and that the model name, prompt hashes and component version match, join them into a new `luna_v2_merged.jsonl`, then run `revalidate.py` and `evaluate.py` on it.
+
 ## Accuracy so far
 
 Batch 1, 30 dev regions, GPT-6 Luna. Tuned and scored on the same regions, so the gain is optimistic.
