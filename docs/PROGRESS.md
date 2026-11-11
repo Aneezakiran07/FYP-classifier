@@ -47,7 +47,7 @@ Last updated: 2026-11-08. Update this file whenever a task changes state. `docs/
 |---|---|
 | Input | `data/raw/final_dataset.jsonl`, 36,589 records, about 14,000 reach the model |
 | Output | `outputs/full/luna_v2.jsonl` on Aneeza's machine, git ignored, plus `commit.txt` and `pip_freeze.txt` |
-| Code | branch `aneeza`, commit `e025275` |
+| Code | branch `aneeza`, commit `e025275` until 2026-11-10, then `2d0ab73` (D16 validators) from 2026-11-11. The model input is the same, and `revalidate.py` applies the newest validators to every record after the run |
 | Model and prompts | `hackclub-classify` (GPT-6 Luna), `router-v1`, `logic-v2`, no few shot examples |
 | Cost estimate | about 0.0006 dollars per model region, about 8 dollars in total, at listed prices not checked word for word |
 | Daily cap | `--max-calls 8000`, about 2.5 dollars, then the same command again the next day |
