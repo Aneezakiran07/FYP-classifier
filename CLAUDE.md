@@ -17,6 +17,13 @@ The classifier assigns one of 23 labels to every merge conflict region. Stages 0
 - Code comments: plain English sentences, one space after the hash, no dashes, no em dashes, no arrows, no symbols, no markdown, no end punctuation. Example: `# strips whitespace from all text columns before comparison`. Keep functions small with plain English names.
 - Ownership: `src/classifier/llm/` and `tests/llm/` are Aneeza's. `src/classifier/rules/` and `tests/rules/` are Fatima's. `schema.py`, `pipeline.py`, `cli.py`, `report.py`, `tests/test_pipeline.py`, `docs/`, `CLAUDE.md` and `.claude/skills/` are shared and need both of them to agree. At the start of a session the user says who they are. Do not edit the other person's folder.
 - Hard boundary: `rules` never imports `llm` and `llm` never imports `rules`. Only `pipeline.py` calls both. Scripts may import from both.
+- Shared full run, from 2026-11-11 until both halves are joined and revalidated (see `docs/PROGRESS.md`, "Split of the run"). Aneeza runs `outputs/full/input_aneeza.jsonl` into `luna_v2.jsonl` and Fatima runs `outputs/full/input_fatima.jsonl` into `luna_v2_fatima.jsonl`, both on commit `2d0ab73`. Rule and validator changes are allowed during the run, because `scripts/revalidate.py` reruns Stages 0 to 3 and the validators on every record afterwards. Stop and flag to the user before any of these, and say why it matters:
+  - Editing `rules/ast_diff.py` or `rules/ast_gate.py`. The AST verdict after the guards goes into the prompt, so a change means later regions are asked with different evidence, and revalidate cannot fix that without new model calls.
+  - Editing anything in `llm/` that changes the prompt text, the few shot examples or the model settings. That mixes two prompt versions in one run.
+  - Starting or restarting the run with the model on from a folder that has uncommitted changes, failing tests or code other than the run commit. Ask the user to confirm which commit the run should load, and to note it with `git rev-parse HEAD`.
+  - Running the classifier with the model on against `final_dataset.jsonl` or the other person's input file instead of your own half, or using `--rerun` on a run output. That pays twice for the same regions or overwrites finished records. `--retry-errors` is for the end of the run only.
+  - Writing, moving or deleting any `outputs/full/input_*.jsonl` or `luna_v2*.jsonl` file (the git ignored data rule above also applies).
+  - Remove this rule once the merged output has been revalidated.
 
 ## 1. Where the classifier sits
 The full pipeline has a classifier, a resolver, a verifier and an evaluation layer. Each one is a separate module with one job.
