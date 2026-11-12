@@ -246,3 +246,134 @@ def test_a_code_block_is_not_a_jsx_child(ours, theirs):
 def test_a_jsx_child_counts_only_in_a_jsx_file():
     region = make_region(ours="<p>Hello {name}</p>", theirs="<p>Hello {user.name}</p>")
     assert not check_assignment_override(region)
+
+
+def test_a_line_that_is_only_a_brace_is_not_a_jsx_slot():
+    # Two lines that are only a brace expression hold no shared text, so they are not one target
+    region = make_tsx_region(ours="      {isOpen && <Modal />}", theirs="      {user.name}")
+    assert not check_assignment_override(region)
+
+
+def test_a_template_substitution_on_its_own_line_is_not_a_jsx_child():
+    # A dollar brace inside a multi line template string is a substitution, not a JSX child
+    ours = "  const cls = `\n    ${borderClass}\n    p-2\n  `;"
+    theirs = "  const cls = `\n    ${squareColor}\n    p-2\n  `;"
+    assert not check_assignment_override(make_tsx_region(ours=ours, theirs=theirs))
+
+
+def test_a_brace_inside_a_multi_line_template_string_is_not_a_jsx_child():
+    # Markup text inside a template string is part of the string, not a JSX child, even without a dollar sign
+    ours = "  const html = `\n    <p>{name}</p>\n  `;"
+    theirs = "  const html = `\n    <p>{title}</p>\n  `;"
+    assert not check_assignment_override(make_tsx_region(ours=ours, theirs=theirs))
+
+
+def test_a_jsx_child_inside_a_tag_still_counts():
+    # A brace between tags still has shared text around it, so it stays one target
+    region = make_tsx_region(ours="      <span>{count}</span>", theirs="      <span>{total}</span>")
+    assert check_assignment_override(region)
+
+
+def test_an_ellipsis_at_the_end_of_a_quote_is_a_gap():
+    # The model shortens a long line with three dots, the part before them must still be real
+    region = make_region(ours="return res.status(200).json({ ok: true });")
+    assert evidence_is_real(region, "OURS: `return res.status(200)...`")
+
+
+def test_an_ellipsis_inside_a_quote_needs_every_part_in_order_on_one_side():
+    region = make_region(ours="{sent ? (<Thanks />) : (<Form onSubmit={send} />)}")
+    assert evidence_is_real(region, "`sent ? (...) : (...)`")
+
+
+def test_parts_around_an_ellipsis_in_the_wrong_order_fail():
+    region = make_region(ours="first(); second();")
+    assert not evidence_is_real(region, "`second()...first()`")
+
+
+def test_parts_around_an_ellipsis_split_across_the_two_sides_fail():
+    # Every part must come from the same side, or two unrelated pieces could be glued together
+    region = make_region(ours="alpha();", theirs="omega();")
+    assert not evidence_is_real(region, "`alpha()...omega()`")
+
+
+def test_an_invented_part_next_to_an_ellipsis_fails():
+    region = make_region(ours="return res.status(200).json(data);")
+    assert not evidence_is_real(region, "`return res.status(500)...`")
+
+
+def test_an_ellipsis_with_only_tiny_parts_proves_nothing():
+    region = make_region(ours="f(a) + g(b)")
+    assert not evidence_is_real(region, "`(...)`")
+
+
+def test_single_quotes_are_read_when_there_are_no_backticks_or_double_quotes():
+    region = make_region(ours="const limit = 10;")
+    assert evidence_is_real(region, "OURS sets 'const limit = 10'")
+
+
+def test_curly_quotes_are_read_when_there_are_no_other_quotes():
+    region = make_region(ours="const limit = 10;")
+    assert evidence_is_real(region, "OURS sets “const limit = 10”")
+
+
+def test_an_invented_single_quote_still_fails():
+    region = make_region(ours="const limit = 10;")
+    assert not evidence_is_real(region, "OURS sets 'const limit = 99'")
+
+
+def test_single_quotes_are_ignored_when_double_quotes_are_present():
+    # Double quotes keep priority, so a short real single quote cannot rescue an invented double quote
+    region = make_region(ours="const limit = 10;")
+    assert not evidence_is_real(region, "\"invented text\" and 'const limit = 10'")
+
+
+def test_a_quote_with_spread_syntax_is_still_real():
+    # Three dots in real spread syntax read as a gap, and the parts around them are still real and in order
+    region = make_region(ours="const merged = { ...defaults, ...options };")
+    assert evidence_is_real(region, "`{ ...defaults, ...options }`")
+
+
+def test_a_lone_jsx_child_under_the_same_opening_line_is_one_target():
+    # A child on its own line inside the same tag is one slot with two expressions
+    ours = '        <p className="subtitle">\n          {t("database.subtitle")}\n        </p>'
+    theirs = '        <p className="subtitle">\n          {t("database.headerSubtitle")}\n        </p>'
+    assert check_assignment_override(make_tsx_region(ours=ours, theirs=theirs))
+
+
+def test_a_lone_jsx_child_under_different_opening_lines_is_not_one_target():
+    ours = "        <header>\n          {isOpen && <Modal />}\n        </header>"
+    theirs = "        <footer>\n          {user.name}\n        </footer>"
+    assert not check_assignment_override(make_tsx_region(ours=ours, theirs=theirs))
+
+
+def test_a_one_line_jsx_child_whose_base_is_a_lone_child_is_one_target():
+    # The base held a lone child in the same place, so both sides changed the same child
+    region = make_tsx_region(
+        ours="        {children || <div>Nenhum conteudo disponivel</div>}",
+        theirs="        {child}",
+        base="        {children}",
+    )
+    assert check_assignment_override(region)
+
+
+def test_a_one_line_jsx_child_with_an_empty_base_is_not_one_target():
+    # Both sides only added a line, so nothing shows the two children sit in the same place
+    region = make_tsx_region(ours="      {isOpen && <Modal />}", theirs="      {user.name}", base="")
+    assert not check_assignment_override(region)
+
+
+def test_a_one_line_jsx_child_over_real_base_text_is_one_target():
+    # Both sides replaced the same base text with a translation call, with different keys
+    region = make_tsx_region(
+        ours="              {t('database.subtitle')}",
+        theirs="              {t('database.headerSubtitle')}",
+        base="              Jelajahi koleksi lengkap brand, parfum, dan perfumer Indonesia\n              dengan informasi detail dan ulasan dari komunitas",
+    )
+    assert check_assignment_override(region)
+
+
+def test_two_lone_jsx_children_inside_longer_sides_need_the_same_line_above():
+    # Aneeza's case inside a longer region, the lone lines sit under different lines so they are not one target
+    ours = "      <Header />\n      {isOpen && <Modal />}"
+    theirs = "      <Footer />\n      {user.name}"
+    assert not check_assignment_override(make_tsx_region(ours=ours, theirs=theirs, base="      <Header />"))

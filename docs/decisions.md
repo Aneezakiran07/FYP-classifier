@@ -538,3 +538,63 @@ Fatima's area (`src/classifier/rules/validators.py`). Built from batch 1 dev reg
 - 15 new tests in `tests/rules/test_validators.py`, none edited. The three from regions 12, 23 and 25 failed before the fix. The rest guard against going too far.
 - `tests/rules` 171, `tests/llm` 56, `tests/test_pipeline.py` 47, all tests 328.
 - These changes apply to the full run for free with `scripts/revalidate.py`, because the model answers are saved in the records.
+
+## D18. Validator fixes from Aneeza's revalidate findings (2026-11-12)
+
+Fatima's area (`src/classifier/rules/validators.py`). Asked for by Aneeza after she ran `scripts/revalidate.py` with the D16 validators on her partial full run (9,853 records, 3,219 model regions, 476 rejected answers). D17 is Aneeza's. Built from her descriptions and made up regions only. Batch 3 and the test split sheets were not opened. The full run keeps collecting answers at `2d0ab73`, and `revalidate.py` applies these validators to every saved answer afterwards with no model calls.
+
+### A. The JSX slot check was too loose
+How the check works: in a `.tsx` or `.jsx` file, assignment-override turns each line with a JSX child brace into a slot, the line with every brace emptied, such as `© {} Sentiment Hound`. If both sides have the same slot with different brace contents, that is one target with two values (D16).
+
+What changed, in its final form:
+- **A template substitution is not a JSX child.** A brace right after `$` is never a child, a brace inside a backtick string on the same line is never a child, and a line that starts inside a multi line template string is skipped (`ends_in_template`). Before, `${borderClass}` against `${squareColor}` passed (`GhayoorShan/Knights-Tour-Codex#9` and `#14`, `components/Square.tsx`, index 1). This part did not change during the measurements below.
+- **A line that holds text or a tag besides its braces** is a slot as before, such as `<span>{count}</span>` or `© {currentYear} ...`.
+- **A line that is only a brace expression** (a lone child) is a slot only when something ties both sides to the same place (`slot_key`, `anchored_on_base`):
+  1. **The same line above it.** The lone line takes the squeezed line above it as its text, so `<p className="subtitle">` followed by `{t("database.subtitle")}` against the same `<p>` followed by `{t("database.headerSubtitle")}` is one target. Under different lines, such as `<Header />` and `<Footer />`, it is not.
+  2. **With no line above it inside the region, the base.** It counts when the base is not empty and either the side is a single non blank line, which then replaced the same base text, or the base holds a lone child too.
+  3. **Otherwise not.** With an empty or missing base, both sides only added lines, so nothing shows the two children sit in the same place.
+- Before, every lone brace line became the same slot `{}`, so `{isOpen && <Modal />}` against `{user.name}` anywhere in a region counted as one target. That is still rejected inside a longer region under different lines above, and with an empty base.
+
+**For Aneeza to decide.** Under rule 2, a single line conflict such as `{isOpen && <Modal />}` against `{user.name}` over a non empty base line now counts as one target. Fatima's reading: both sides replaced the same base line with a different child, and only one can survive a merge, which is the Table 5.1 meaning of assignment-override. If you read your example differently, say so and the base condition can be narrowed.
+
+How the rule was reached, measured on Fatima's half of the full run (train and dev only, see the table below):
+1. **First version:** every lone brace line was rejected. 10 assignment-override answers newly failed, and most were real children on their own line, such as `{t('database.subtitle')}` against `{t('database.headerSubtitle')}`.
+2. **Second version:** a lone line counts under the same line above. 8 still newly failed.
+3. **Third version:** with no line above, it counts when the base holds a lone child too. This fixed `brunenrique/bhc#162` (base `{children}`, ours `{children || <div>...</div>}`, theirs `{child}`). 6 still newly failed, all from `beriman/www.SensasiWangi.id#29`.
+4. **Final version:** those 6 have a base of two or three lines of prose (Indonesian text in `src/pages/database.tsx` index 2, English in `src/pages/home.tsx` index 1), and each side replaced it with one `t(...)` call with a different key. So a single line side over a non empty base counts too.
+
+### B. Gaps and other quote marks in evidence
+- **Three dots inside a quote are a gap.** The quote is split at `...` or the ellipsis character, every part must appear on the same side in order, and the longest part must be at least 3 characters. `return res.status(200)...` and `sent ? (...) : (...)` now pass when the parts are real. Parts split across ours and theirs, parts in the wrong order, an invented part, or only tiny parts such as `(...)` still fail. Aneeza counted 87 rejections of this kind.
+- **Spread syntax** such as `{ ...defaults, ...options }` reads as gaps too, and still passes because its parts are real and in order.
+- **Single and curly quotes** are read only when the evidence has no backticks and no double quotes, with at least 3 characters, the same as double quotes. Aneeza counted 44 rejections of this kind.
+- `quoted_pieces` is unchanged, because `scripts/build_few_shot.py` uses it. The new reading is in `plain_quoted_pieces` and `gapped_piece_is_real`.
+- This makes the validator looser, so it is measured on train and dev answers only, below.
+
+### Measuring on train and dev, never test
+- New read only script `scripts/compare_validators.py`. It reads a run output, keeps train and dev records only and refuses the test split, repeats the first met test selection from the saved answers, and runs the old validators (loaded from another source folder, such as the run folder at `2d0ab73`) and the new ones side by side. It lists newly passing and newly failing answers and marks dev hand labels.
+
+All rows: Fatima's half of the full run (`luna_v2_fatima.jsonl`, answers collected at `2d0ab73`), train and dev records only, while the run was still writing, so the counts grow a little between rows. Old means the validators at `2d0ab73` (D16).
+
+| Version of fix A | Records | Answers checked | Old pass | New pass | Newly pass | Newly fail | Newly fail with a dev hand label |
+|---|---|---|---|---|---|---|---|
+| First (lone braces rejected) | 1,481 | 380 | 267 | 277 | 20 | 10 | 0 |
+| Second (line above) | 1,485 | 383 | 269 | 281 | 20 | 8 | 0 |
+| Third (lone child in the base) | 1,496 | 389 | 274 | 288 | 20 | 6 | 0 |
+| Final (single line over base text) | 1,512 | 394 | 279 | 304 | 25 | 0 | 0 |
+
+- The 20 newly passing answers in the first three rows are the same answers, and their evidence needed fix B (a gap or single quotes). None is on a dev hand labeled region.
+- The final row has 5 more, all assignment-override on lone JSX child lines over real base text (4 in `beriman/www.SensasiWangi.id#29`, 1 in `TrashBandicoot369/oui-chef#11`). Their evidence quotes the keys in single quotes with no backticks, so the old validators found no quote at all. They need fix B to read the quotes and the final fix A rule to keep their slot.
+- Every newly failing answer in the first three rows came from fix A and was assignment-override. The final version has none.
+- In total, D18 moves 279 of 394 passing answers to 304 of 394 on this sample (70.8 to 77.2 percent), with no answer that passed before now failing.
+
+### Known limits
+- A template string that holds another template string inside `${}` can confuse the backtick count for the rest of that line or region. This can only skip a JSX slot, which makes the check stricter.
+- A gap quote proves only that its parts exist in order on one side, not that the text between them is what the model meant.
+
+### Tests
+- `tests/rules/test_validators.py`: 21 tests added. Fix A: 3 from Aneeza's cases that failed before the fix (only braces, template substitution, markup inside a template string) and 1 guard (a child between tags still counts); after the measurements, 3 that each failed on the version before them (lone child under the same opening line, one line child over a lone child in the base, one line child over prose in the base) and 3 guards (different opening lines, empty base, Aneeza's pair inside a longer region). Fix B: 4 that failed before the fix and 7 guards including spread syntax.
+- **One of these tests was edited, before any commit.** The guard added for the third version, `test_a_one_line_jsx_child_with_no_lone_child_in_the_base_is_not_one_target`, used a made up base `<Spinner />` and expected no target. The final rule counts a one line child over any non empty base, so Fatima approved renaming it to `test_a_one_line_jsx_child_with_an_empty_base_is_not_one_target` and changing its base to empty, keeping the assertion that it is not a target. Aneeza's pair inside a longer region got its own new guard.
+- One more of the new tests was rewritten before it was committed: its first example (`color: red` against `color: blue` in a CSS template string) is caught by the older `name: value` reader, so it did not test the JSX change. It now uses markup text inside a template string, and it fails on the old code.
+- No test that existed before D18 was edited.
+- New file `tests/test_compare_validators.py` with 3 tests.
+- `tests/rules` 192, `tests/llm` 56, `tests/test_pipeline.py` 47, all tests 352.

@@ -1,5 +1,5 @@
 # Deterministic checks that confirm what the model claimed about a region before a logic label is written
-# evidence_is_real requires every quoted piece of the evidence to appear in ours, theirs or base, and a quote may hold a template string
+# evidence_is_real requires every quoted piece of the evidence to appear in ours, theirs or base, and a quote may hold a template string or a gap marked by three dots
 # CHECKS holds one cheap text check per logic test, and assignment override reads names with values, return types and JSX children
 # validate_logic_test needs both checks to pass, confluent interference always fails, and confirm_structural is not built yet so it returns None
 
@@ -10,6 +10,12 @@ import re
 
 QUOTED = re.compile(r"`([^`]+)`")
 DOUBLE_QUOTED = re.compile(r'"([^"]{3,})"')
+SINGLE_QUOTED = re.compile(r"'([^'\n]{3,})'")
+CURLY_QUOTED = re.compile("[\u201c\u2018]([^\u201c\u201d\u2018\u2019\n]{3,})[\u201d\u2019]")
+# three dots or the ellipsis character mark a gap the model left out of a quote
+ELLIPSIS = re.compile("\\.\\.\\.|\u2026")
+# the longest part around a gap must be at least this long so tiny parts prove nothing
+MIN_PART_AROUND_GAP = 3
 SIDE_LABEL = re.compile(r"^(?:OURS|THEIRS|BASE)\s*:\s*", re.IGNORECASE)
 AST_KIND = re.compile(r"^[a-z_]+_(?:added|removed|replaced|changed)(?::|$)")
 
@@ -95,6 +101,8 @@ def piece_is_real(piece, region):
     # An AST change name comes from the parser summary, so it is not in the region text
     if AST_KIND.match(piece):
         return True
+    if ELLIPSIS.search(piece):
+        return gapped_piece_is_real(piece, region)
     target = squeeze(piece)
     for text in (region.ours_text, region.theirs_text, region.base_text):
         if target in squeeze(text):
@@ -102,12 +110,41 @@ def piece_is_real(piece, region):
     return False
 
 
+def gapped_piece_is_real(piece, region):
+    # Every part around a gap must appear in order on one side, and one part must be long enough to mean something
+    parts = [squeeze(part) for part in ELLIPSIS.split(piece)]
+    parts = [part for part in parts if part]
+    if not parts or max(len(part) for part in parts) < MIN_PART_AROUND_GAP:
+        return False
+    return any(parts_in_order(parts, squeeze(text))
+               for text in (region.ours_text, region.theirs_text, region.base_text))
+
+
+def parts_in_order(parts, text):
+    position = 0
+    for part in parts:
+        found = text.find(part, position)
+        if found < 0:
+            return False
+        position = found + len(part)
+    return True
+
+
+def plain_quoted_pieces(evidence):
+    # Double quotes first, then single or curly quotes only when there are no double quotes
+    found = DOUBLE_QUOTED.findall(evidence or "")
+    if not found:
+        found = SINGLE_QUOTED.findall(evidence or "") + CURLY_QUOTED.findall(evidence or "")
+    return [clean_piece(piece) for piece in found if clean_piece(piece)]
+
+
 def evidence_is_real(region, evidence):
     # Check one, at least one quoted piece and every piece must appear in the region
-    # Backtick quotes are read with template strings in mind, double quotes only when there are no backticks
+    # Backtick quotes are read with template strings in mind, other quotes only when there are no backticks
+    # Three dots inside a quote are a gap, and every part around it must still be real and in order
     if "`" in (evidence or ""):
         return backtick_quotes_are_real(region, evidence)
-    pieces = quoted_pieces(evidence)
+    pieces = plain_quoted_pieces(evidence)
     if not pieces:
         return False
     return all(piece_is_real(piece, region) for piece in pieces)
@@ -185,24 +222,81 @@ def return_types(text):
     return found
 
 
-def jsx_child_slots(text):
+def jsx_child_slots(text, base=None):
     # Each line with a brace expression in child position becomes its text with empty braces and the expressions
+    # A line that starts inside a template string is text of that string, not markup
     slots = {}
+    base_anchor = "base" if anchored_on_base(text, base) else ""
+    in_template = False
+    previous = ""
     for line in (text or "").splitlines():
+        starts_in_template = in_template
+        in_template = ends_in_template(line, in_template)
+        above, previous = previous, squeeze(line) or previous
+        if starts_in_template:
+            continue
         first = FIRST_WORD.match(line)
         if first and first.group(1) in CODE_WORDS:
             continue
         shape, children = split_jsx_children(line)
-        if children:
-            slots.setdefault(squeeze(shape), set()).add(tuple(children))
+        key = slot_key(shape, above or base_anchor)
+        if children and key:
+            slots.setdefault(key, set()).add(tuple(children))
     return slots
+
+
+def anchored_on_base(text, base):
+    # A lone child with no line above is tied to the base when the base holds a lone child too
+    # or when the side is a single line that replaced base text, so both sides changed the same place
+    if not squeeze(base):
+        return False
+    single_line = len([line for line in (text or "").splitlines() if line.strip()]) == 1
+    return single_line or has_lone_child(base)
+
+
+def has_lone_child(text):
+    # True when some line of the text is only a JSX child brace with nothing around it
+    for line in (text or "").splitlines():
+        shape, children = split_jsx_children(line)
+        if children and not has_text_around(shape):
+            return True
+    return False
+
+
+def slot_key(shape, above):
+    # A slot needs shared text or a tag besides its braces
+    # A line that is only braces takes the line above it as its text, so it is one slot only under the same opening line
+    # With no line above, it counts only when it is anchored on the base, see anchored_on_base
+    if has_text_around(shape):
+        return squeeze(shape)
+    if above:
+        return above + "\n" + squeeze(shape)
+    return None
+
+
+def ends_in_template(line, in_template):
+    # Every backtick that is not escaped opens or closes a template string
+    escaped = False
+    for char in line:
+        if char == "`" and not escaped:
+            in_template = not in_template
+        escaped = char == "\\" and not escaped
+    return in_template
+
+
+def has_text_around(shape):
+    # A slot needs shared text or a tag besides its braces, or any two lone braces would be one target
+    return bool(squeeze(shape).replace("{}", ""))
 
 
 def split_jsx_children(line):
     # Walks the line and lifts out every balanced top level brace that is not in code position
-    shape, children, depth, start = [], [], 0, None
+    # A brace inside a backtick string on the same line is never a JSX child
+    shape, children, depth, start, in_tick = [], [], 0, None, False
     for index, char in enumerate(line):
-        if depth == 0 and char == "{" and is_child_brace(line, index):
+        if depth == 0 and char == "`":
+            in_tick = not in_tick
+        if depth == 0 and not in_tick and char == "{" and is_child_brace(line, index):
             depth, start = 1, index
             continue
         if depth:
@@ -221,6 +315,9 @@ def is_child_brace(line, index):
     before = line[:index].rstrip()
     if not before:
         return True
+    # A dollar sign before the brace makes it a template substitution
+    if line[:index].endswith("$"):
+        return False
     if before[-1] in NOT_JSX_CHILD_BEFORE or before.endswith("=>"):
         return False
     last = LAST_WORD.search(before)
@@ -235,7 +332,7 @@ def target_readers(region):
     # A JSX child can only be a target in a JSX file
     readers = [assignments, return_types]
     if (region.file_path or "").endswith(JSX_FILES):
-        readers.append(jsx_child_slots)
+        readers.append(lambda text: jsx_child_slots(text, region.base_text))
     return readers
 
 
@@ -278,4 +375,4 @@ def validate_logic_test(region, test_id, evidence):
 
 def confirm_structural(region, ast_verdict):
     # Not built yet, so a structural hint never gets a label and the region stays unknown
-    return None
+    return None
