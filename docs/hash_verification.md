@@ -27,7 +27,7 @@ The mismatch comes from the conflict style, not from wrong text. Git builds regi
 
 Points 2 and 3 change how many regions a file has, so `conflict_index` stops lining up and the index join compares the wrong regions. In the final dataset, 5,547 of 17,526 files have a different region count in the two datasets.
 
-Evidence that this is the cause: for every region we computed its line position on the ours side and on the theirs side, which is the same in both styles. On the 14,660 regions that already matched, the positions agree for 14,457 (98.6 percent), so position matching works. Of the 25,967 AgenticFlict regions that have no diff3 region with the same identifier, 25,947 (99.9 percent) overlap a diff3 region by position. They are the same conflicts, numbered differently.
+Evidence that this is the cause: for every region we computed its line position on the ours side and on the theirs side, which is the same in both styles. On the 14,660 regions that already matched, the positions agree for 14,457 (98.6 percent), so position matching works. Of the 25,967 AgenticFlict regions that have no diff3 region with the same identifier, 23,778 (91.6 percent) have the same ours and theirs hashes as a diff3 region or as a region rebuilt in steps 3 and 4 below, so they are proven to be the same conflicts, numbered differently. Another 2,184 (8.4 percent) overlap a diff3 region by position without a hash match, so they are most likely the same. Only 5 have no diff3 region at their position. Source: `scripts/verify_diff3_hashes_extra.py`.
 
 ## How the hashes were made to match
 
@@ -73,7 +73,7 @@ Eligible pool: 8,621 regions (24.5 percent) left, of which 7,746 are joined regi
 ## Limits of the claim
 
 - Steps 3 and 4 verify the lines that lie inside the default style region. The edge lines Git trims are identical on both sides and are outside the AgenticFlict hash, so the hash says nothing about them.
-- A region the re-merge fails to match is not evidence of wrong text. Re-merging three snippets without the rest of the file can line up lines differently from a whole file merge.
+- A region the re-merge fails to match is not evidence of wrong text. Re-merging three snippets without the rest of the file can line up lines differently from a whole file merge. Measured on the 14,645 regions that step 1 already verified and that have a base: the re-merge failed to reproduce the hashes for 422 of them (2.9 percent, 251 no match and 171 no conflict), although their text is known to be right. Source: `scripts/verify_diff3_hashes_extra.py`.
 - The base text is still outside the claim, since AgenticFlict has no base hash.
 - The gap lines in step 4 come from the dataset itself. They are search candidates, never stored as data.
 
