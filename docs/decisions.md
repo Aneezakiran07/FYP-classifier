@@ -598,3 +598,44 @@ All rows: Fatima's half of the full run (`luna_v2_fatima.jsonl`, answers collect
 - No test that existed before D18 was edited.
 - New file `tests/test_compare_validators.py` with 3 tests.
 - `tests/rules` 192, `tests/llm` 56, `tests/test_pipeline.py` 47, all tests 352.
+
+### Follow up after Aneeza's review (2026-11-14), not merged
+- Aneeza merged D18 into `aneeza` (`5a08ae3`) and agreed with the rule 2 reading in "For Aneeza to decide".
+- **Known limit: a shared position shows the same place, not the same job.** A lone child slot shows that two JSX children sit in the same place in the file. It does not show that they do the same job, and two JSX children could both be kept as siblings, where only one value of a variable can survive. The validator accepts the model's judgment that they compete, and human review is the backstop, because assignment-override always goes to human review in the resolver.
+- **How often this matters, measured by Aneeza** on her half of the run, train and dev only: of 364 assignment-override answers (272 accepted at run time and 92 rejected), 4 pass only because of a lone JSX slot with no named assignment or return type behind them. 2 are real (`hendrism/damage-calc#7` `CardDamageCalculator.tsx` index 8, `himanshugupta30062/Sahadhyayi#226` `[slug].tsx` index 0). The other 2 (`devjohxylon/Buildrs#2` `page.tsx` index 7 and 8) pass because ours is a JSX comment `{/* ... */}`, which is not a value. A rough "same kind of child" check would have rejected the right damage-calc answer, so none was added.
+- **The comment fix was built and not merged.** Fatima built it (a brace that holds only a block comment stays part of the line text and is never a JSX child) with one test from the Buildrs case, which failed before the change. It was left out because the code was frozen at `5a08ae3` on 14 November (D19). It changes about 2 answers, and it would change the test count in five places of the report. It is FYP-II work, together with D19.
+
+## D19. DisjointEdits on an empty base, built, checked and not merged (2026-11-14)
+
+Fatima's area (`src/classifier/rules/patterns/disjoint_edits.py`). Asked for by Aneeza after her revalidate findings, where about 536 model unknowns had an empty base. Agreed by both authors on 14 November not to merge it. The classifier code is frozen at `5a08ae3`, the commit the report, the test cases and Aneeza's half of the run use. No code from this entry is in the repository. Batch 3 and the test split sheets were not used to build it.
+
+### The problem
+DisjointEdits never runs on an empty base, because both the registry and the pattern treat an empty base as no base. So a region where each side only adds different lines goes to the model, and the model may not write `disjoint-edits`. Seven regions of dev batches 1 and 2 have that hand label on an empty base (2, 6, 14, 20, 42, 49, 56), and they can never come out right.
+
+### What was built and measured, train and dev of the eligible pool
+| Version | Regions moved from Stage 4 to `disjoint-edits` | Notes |
+|---|---|---|
+| Empty base stop removed, nothing else (Aneeza's rebuild) | 1,471 | Wrong on dev regions 19 and 27, both hand labeled unknown. Her rebuild also fired on 16 of the 27 missing base regions |
+| Guard 1, the two sides share no line with a word or number, and guard 2, no declaration line of the same shape once names are replaced | 989 (986 in `.ts` or `.tsx`) | Guard 2 was Aneeza's placeholder idea, narrowed to declaration lines because her full version lost dev region 6 |
+| Guards 3, a single line on each side that differs only in a string or number value, and 4, the same imported name on both sides | 913 (910 in `.ts` or `.tsx`) | `compare_funnels.py` against `funnel_d14c`, nothing unexplained, no other stage changed |
+
+- On the 15 empty base regions of dev batches 1 and 2, the final version made the 7 above right and none wrong. Regions 19 and 27 stayed with the model, and a missing base was still refused.
+- **Spot checks.** Because 7 hand labels say little about about 900 regions, random samples of the regions that moved were read by hand, leaving out dev batches 1, 2 and 3.
+
+| Sample | Version | Clearly right | Cannot tell | Clearly wrong |
+|---|---|---|---|---|
+| 1, seed 20261113, 20 of 975 | Guards 1 and 2 | 12 | 3 | 5 |
+| 2, seed 20261114, 20 of 899, not used to build the guards | Guards 1 to 4 | 11 | 2 | 7 |
+
+- The wrong ones in sample 2 show two gaps. Names declared by destructuring, such as `const [open, setOpen] = useState(true)` against `useState(false)`, are invisible to the name checks. And two sides often add the same thing in two ways, such as the same null check written twice or the same `useRef` under two names, which no text rule catches reliably.
+- **Narrow version, checked by Aneeza.** Accepting only regions where both sides add imports with different names moves about 240 regions (228 outside batch 3). In a seeded sample of 30, 3 to 4 were doubtful: the same default import under two names (`MockRedis` and `RedisMock` from `ioredis-mock`), an export renamed on one side (`Routes` and `routes`), a competing choice (`Link` against `NavLink`), and side effect imports, which bind no name. Her proposed extra guard (step aside when both sides import from the same module, when either side has a side effect import, or when two names match after ignoring case, a `use` prefix and a trailing `s`) removed 23 regions, about 15 of them wrong or doubtful, and left 1 to 2 doubtful in 23.
+
+### Decision
+- Not merged, and the code is frozen at `5a08ae3`. `disjoint-edits` later tells the resolver that both sides can be kept, so a wrong one can merge two things that clash with no person in between, which is worse than an unknown. The checked versions were wrong too often, and checking a further version properly would have moved the code freeze past the test scoring.
+- The 7 dev regions stay with the model, as the report already describes.
+
+### For FYP-II
+- Accept an empty base DisjointEdits only when a fresh random sample of 30 of the regions it moves, drawn from regions that did not shape it, has at most 5 percent wrong.
+- Check it on held out dev batch 3 regions 62, 82 and 102, where the built version fires.
+- Read names declared by destructuring in the name checks, treat `true` and `false` as values in guard 3, and add Aneeza's import guard.
+- Merge the JSX comment fix from the D18 follow up at the same time.
