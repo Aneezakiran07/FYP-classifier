@@ -66,7 +66,7 @@ Final dataset, 13,554 regions (24.8 percent) not hash verified.
 | No base text, so no re-merge | 35 | 0.1% |
 | Other | 3 | 0.0% |
 
-About 22.4 percent of the final dataset (12,210 regions) sits inside a joined AgenticFlict region and only lacks the lines between the conflicts. Only 1,344 regions (2.5 percent) are not explained by the boundary effect.
+About 22.3 percent of the final dataset (12,210 regions) sits inside a joined AgenticFlict region and only lacks the lines between the conflicts. Only 1,344 regions (2.5 percent) are not explained by the boundary effect.
 
 Eligible pool: 8,621 regions (24.5 percent) left, of which 7,746 are joined regions with an unknown gap.
 
@@ -81,7 +81,7 @@ Eligible pool: 8,621 regions (24.5 percent) left, of which 7,746 are joined regi
 
 Everything left needs the lines around the regions, which only the repositories hold.
 
-1. Re-clone the repositories of the pull requests that still have unverified regions, merge again in the default style and hash the full regions. This would cover the joined regions (22.4 percent). It needs network and disk, and takes about as long as the original reconstruction for those repositories.
+1. Re-clone the repositories of the pull requests that still have unverified regions, merge again in the default style and hash the full regions. This would cover the joined regions (22.3 percent). It needs network and disk, and takes about as long as the original reconstruction for those repositories.
 2. If the full re-clone is too slow, do it on a seeded random sample of about 50 pull requests and report the match rate as an estimate for the rest.
 3. Check the 303 regions with no joined AgenticFlict region and the 559 partly matched ones by hand on a few examples.
 

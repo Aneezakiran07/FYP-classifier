@@ -1,16 +1,16 @@
 # Start here
 
-The starting point for Aneeza and Fatima, as of 2026-11-08. It says what exists, what the numbers are, and who does what next.
+The starting point for Aneeza and Fatima, as of 2026-11-15. It says what exists, what the numbers are, and who does what next.
 
-Read this first. Then read `CLAUDE.md` (the design and the rules) and `docs/decisions.md` (every choice made so far, D1 to D15). `docs/PROGRESS.md` is the live checklist, so update that one as work moves.
+Read this first. Then read `CLAUDE.md` (the design and the rules) and `docs/decisions.md` (every choice made so far, D1 to D20). `docs/PROGRESS.md` is the live checklist, so update that one as work moves.
 
 ## 1. Where we are
 
-**The full run is going.** It started on 2026-11-08 on Aneeza's machine with GPT-6 Luna and the `logic-v2` prompt, and takes about 4 days at about 2.5 dollars a day.
+**The full run is finished.** It ran from 2026-11-08 to 2026-11-15 with GPT-6 Luna and the `logic-v2` prompt, split between both machines. The joined and revalidated output is `outputs/full/luna_v2_reval.jsonl` (D20). The code is frozen at `5a08ae3`.
 
-**The first accuracy number exists, and it is low.** On batch 1 (30 dev regions) the classifier gets 16 of 30 right, and the model part 15 of 29. This is a small sample, tuned and scored on the same regions.
+**Dev accuracy is 41 of 80.** Batch 1 (tuned on) gets 18 of 30 and batch 3 (not tuned on) 23 of 50. 29 of the 36 logic labels the model gave are right, and 23 of the 39 misses have a label only a rule can write. No test set number exists: the two test sheets and the 61 to 70 agreement check are left for FYP-II (D20).
 
-Most misses are not the model's fault:
+The first look at batch 1, before the validator fixes, gave 16 of 30. Most misses were not the model's fault:
 
 | Cause of a miss on batch 1 | Count | Fix |
 |---|---|---|
@@ -19,7 +19,7 @@ Most misses are not the model's fault:
 | The model shortened a quote | 1 | Small prompt fix, after the run |
 | The model was wrong or the label is disputed | about 3 | Prompt, tie break or model |
 
-**What is still needed for trustworthy numbers:** batch 3 labels, the rule and validator fixes, labels for regions the rules decide, and `filtered_prs.csv` for the per agent table.
+**What is still needed for trustworthy numbers:** hand labels for the two test sheets, the second set of labels for regions 61 to 70, the rule fixes (D12 value-only, DisjointEdits on an empty base, `confirm_structural`), and `filtered_prs.csv` for the per agent table.
 
 ## 2. How a region moves through the classifier
 
@@ -75,7 +75,7 @@ final_dataset.jsonl
 | `revalidate.py` | Applies the current rules and validators to a finished run with no model calls, into a new file |
 
 ### Tests
-All pass with no real API calls: 259 in `tests/rules`, `tests/llm` and `tests/test_pipeline.py`, 313 in the whole folder.
+All pass with no real API calls: 295 in `tests/rules`, `tests/llm` and `tests/test_pipeline.py`, 352 in the whole folder.
 
 ### Not in git
 - `.env`: your own keys. Never read, print or commit it.
@@ -101,7 +101,8 @@ All figures describe `final_dataset.jsonl` (4,119 pull requests, 36,589 records)
 - **Split:** by `pr_key`, seed 20261105, 70, 15 and 15 percent, stratified by file count bucket, not by agent.
 - **Smoke test:** 100 dev regions, 0 failed calls, about 0.09 dollars.
 - **Batch 1:** see section 1 and D15.
-- **Full run:** see `docs/PROGRESS.md`.
+- **Full run:** 14,030 regions reached the model, 13,931 decided, 99 capped, 0 llm-error. After revalidation 52.9 percent of the decided ones are unknown. See `docs/PROGRESS.md` and D20.
+- **Dev accuracy:** 41 of 80 on batches 1 and 3, see section 1 and D20.
 
 ## 6. How to run things
 

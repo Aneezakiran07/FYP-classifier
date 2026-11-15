@@ -1,10 +1,10 @@
 # Classifier progress
 
-Last updated: 2026-11-08. Update this file whenever a task changes state. `docs/START_HERE.md` has the full picture.
+Last updated: 2026-11-15. Update this file whenever a task changes state. `docs/START_HERE.md` has the full picture.
 
 **Goal:** run `data/raw/final_dataset.jsonl` with the LLM stage on, and get a trustworthy label or status for every region.
 
-**Where we are:** roughly 52 percent of the way there. This percentage is a judgment, not a measurement. The full run started on 2026-11-08 with GPT-6 Luna and `logic-v2`. The first accuracy number exists (batch 1, 16 of 30). The main gaps are batch 3 labels, the rule and validator fixes, and labels for the rules part.
+**Where we are:** the full run is finished, joined and revalidated (2026-11-15, D20), and the code is frozen at `5a08ae3`. Every region of the eligible pool has a record. Dev accuracy on batches 1 and 3 is 41 of 80. What is left is FYP-II work: hand labels for the two test sheets and the 61 to 70 agreement check, then the one final scoring, plus the missing classifier parts (export-shape, `confirm_structural`, the rule trace, changed names).
 
 ## Phase 2 build order
 
@@ -34,12 +34,12 @@ Last updated: 2026-11-08. Update this file whenever a task changes state. `docs/
 | 4 | Smoke test, 100 dev regions | Aneeza | Done, 0 failed calls, about 0.09 dollars |
 | 5 | Validators confirm the labels | Fatima | Done for logic labels, gaps listed in D15 |
 | 6 | Evaluation script | Aneeza | Done |
-| 7 | Hand labels for a dev sample | Both | Batch 1 (30) reviewed. Batch 2 (30, for few shot) reviewed by Aneeza. Batch 3 (50, for scoring) with Fatima. Regions 61 to 70 to be labeled by both, separately |
+| 7 | Hand labels for a dev sample | Both | Batch 1 (30) reviewed. Batch 2 (30, for few shot) reviewed by Aneeza. Batch 3 (50, for scoring) labeled by Fatima by hand, 2026-11-14. Aneeza's second set for regions 61 to 70 is not done, left for FYP-II (D20) |
 | 8 | Few shot examples, with per test answers | Aneeza | 7 built, kept off in `few_shot_candidates.json` after no gain on batch 1 (D15) |
 | 9 | Tune prompts and rules, compare models on dev | Both | One prompt round (`logic-v2`). Model comparison waits for batch 3 |
-| 10 | Full run on the dataset | Aneeza | Running since 2026-11-08, see below |
-| 11 | Labels for regions the rules decide, so the rules part has an accuracy | Both | Not started, all hand labels so far are regions that reach the model |
-| 12 | Final numbers on the test set, once only, per agent too | Both | Needs items 10 and 11, test labels and `filtered_prs.csv` |
+| 10 | Full run on the dataset | Both | Done 2026-11-15, joined and revalidated, see below and D20 |
+| 11 | Labels for regions the rules decide, so the rules part has an accuracy | Both | The rules test sheet (301 to 350) is drawn and not labeled, left for FYP-II (D20) |
+| 12 | Final numbers on the test set, once only, per agent too | Both | Left for FYP-II (D20). Both test sheets are drawn and already classified by the full run, so scoring needs labels only. Per agent still needs `filtered_prs.csv` |
 
 ## Full run
 
@@ -66,7 +66,20 @@ The run is shared so it ends sooner, each half on its own Hack Club key. Both ha
 
 - Both input files are exact line copies of `final_dataset.jsonl` (hash `4E5DC859A66F089A8F70778EB28A152DA73C06900EB5C1A50C65C9D27B187F14`), and joined in order they are byte identical to it.
 - Fatima runs from a folder with no rule changes until her half ends.
-- After both halves end: check that no key is in both outputs and that the model name, prompt hashes and component version match, join them into a new `luna_v2_merged.jsonl`, then run `revalidate.py` and `evaluate.py` on it.
+- After both halves end: check that no key is in both outputs and that the model name, prompt hashes and component version match, join them into a new `luna_v2_merged.jsonl`, then run `revalidate.py` and `evaluate.py` on it. Done on 2026-11-15, see below.
+
+### Run ended, 2026-11-15 (D20)
+
+| Item | Value |
+|---|---|
+| Joined file | `outputs/full/luna_v2_merged.jsonl`, 36,589 records in the order of `final_dataset.jsonl`, `Get-FileHash` `5F6B19572FA770F5DE0548E9F7037BE302D2C7E25F2A695FAED6E41FC3473CC4` |
+| Revalidated file | `outputs/full/luna_v2_reval.jsonl`, rules and validators of `5a08ae3`, `Get-FileHash` `51DAFEB09D43DE2F3661A8A9710E2D7901840ECE7710684B46BD9109501A2944` |
+| Reached the model | 14,030 regions (8,671 Aneeza, 5,359 Fatima), 13,931 decided, 99 capped (9 and 90), 0 llm-error after one `--retry-errors` pass on 84 regions |
+| Model calls and time | 27,201 calls, about 78 hours of active time (42 and 36), about 20 seconds per model region |
+| Revalidation | 242 records changed: 240 validator-failed to a logic label, 2 assignment-override to unknown. No rule decision changed and no region needs the model again |
+| Unknown share of decided model regions | 54.6 percent before revalidation, 52.9 percent after (52.4 Aneeza, 53.7 Fatima) |
+
+Both files are git ignored and were made on Aneeza's machine. Send them to Fatima and compare `Get-FileHash`.
 
 ## Accuracy so far
 
@@ -78,6 +91,16 @@ Batch 1, 30 dev regions, GPT-6 Luna. Tuned and scored on the same regions, so th
 | `logic-v2` | 16/30 | 15/29 |
 
 8 of the 29 model regions have a rule only label the model cannot write.
+
+Final dev numbers, `scripts/evaluate.py` on `luna_v2_reval.jsonl`, 2026-11-15 (D20):
+
+| Sheet | All | Model part |
+|---|---|---|
+| Batch 1 (tuned on) | 18/30 | 17/29 |
+| Batch 3 (not tuned on) | 23/50 | 23/50 |
+| Both | 41/80 | 40/79 |
+
+29 of the 36 logic labels the model gave are right. 23 of the 39 misses have a rule only label the model cannot write, 15 of them `disjoint-edits`. No test set number exists yet.
 
 ## Open questions
 

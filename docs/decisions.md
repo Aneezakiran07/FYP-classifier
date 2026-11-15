@@ -639,3 +639,59 @@ DisjointEdits never runs on an empty base, because both the registry and the pat
 - Check it on held out dev batch 3 regions 62, 82 and 102, where the built version fires.
 - Read names declared by destructuring in the name checks, treat `true` and `false` as values in guard 3, and add Aneeza's import guard.
 - Merge the JSX comment fix from the D18 follow up at the same time.
+
+## D20. End of the full run, join, revalidation and dev scores (2026-11-15)
+
+Shared entry, written from Aneeza's machine. Fatima should review it. No code changed, and the rules, validators and prompts stay frozen at `5a08ae3`.
+
+### How the run ended
+- Aneeza's half (`input_aneeza.jsonl`, 22,970 records) was finished from two extra input files, `input_aneeza_a.jsonl` (195 pull requests) and `input_aneeza_b.jsonl` (217 pull requests), with part b written to `luna_v2_aneeza_b.jsonl`.
+- **A mistake:** a restart then ran `input_aneeza.jsonl` into `luna_v2.jsonl` again, which started to classify part b a second time. It was stopped after 199 duplicate keys, 92 of them model regions. 14 of the 92 got a different label the second time, at temperature zero, so one model answer is not fully repeatable.
+- **Join.** `luna_v2.jsonl`, `luna_v2_aneeza_b.jsonl` and `luna_v2_fatima.jsonl` were joined into `outputs/full/luna_v2_merged.jsonl`, 36,589 records in the order of `final_dataset.jsonl`, no key missing and none extra. For the 199 duplicates the `luna_v2_aneeza_b.jsonl` copy is kept, because that file was the planned output for those pull requests. The model name, the prompt hashes and the component version are the same in all three files.
+- **Retry.** 84 regions of Aneeza's half were `llm-error`, all `transport-error`. One pass of `--retry-errors --max-retries 2 --max-calls 250` on the merged file, with `final_dataset.jsonl` as input, decided all 84. It was run on the merged file and not on `luna_v2.jsonl`, because `--retry-errors` also classifies every key that has no record, and `luna_v2.jsonl` did not hold all of part b.
+- `Get-FileHash` of `luna_v2_merged.jsonl` after the retry: `5F6B19572FA770F5DE0548E9F7037BE302D2C7E25F2A695FAED6E41FC3473CC4`.
+
+### Final counts of the run
+| | Aneeza | Fatima | Both |
+|---|---|---|---|
+| Records | 22,970 | 13,619 | 36,589 |
+| Reached the model | 8,671 | 5,359 | 14,030 |
+| Decided | 8,662 | 5,269 | 13,931 |
+| Capped, `call-ceiling` | 9 | 90 | 99 |
+| `llm-error` | 0 | 0 | 0 |
+| Model calls | 16,872 | 10,329 | 27,201 |
+| Active time, gaps over ten minutes left out | about 42 hours | about 36 hours | about 78 hours |
+
+Aneeza's call count includes the 84 retries and not the dropped duplicate copies.
+
+### Revalidation
+- `scripts/revalidate.py outputs/full/luna_v2_merged.jsonl outputs/full/luna_v2_reval.jsonl` at commit `26f80e7`, whose `src/` is identical to `5a08ae3`.
+- 242 records changed: 240 `unknown (validator-failed)` became a logic label (89 overlap-contamination, 60 business-logic-conflict, 59 assignment-override, 26 execution-perturbation, 6 null-safety-conflict) and 2 assignment-override became `unknown (validator-failed)`.
+- No rule decision changed and no region was left out, so nothing needs the model again. This was expected, because only `validators.py` changed between the run commits (`e025275`, `2d0ab73`) and `5a08ae3`.
+- Unknown share of the decided model regions: 54.6 percent before, 52.9 percent after (52.4 Aneeza, 53.7 Fatima). Validator-failed went from 1,844 to 1,606. Ambiguous structural hints: 685.
+- `Get-FileHash` of `luna_v2_reval.jsonl`: `51DAFEB09D43DE2F3661A8A9710E2D7901840ECE7710684B46BD9109501A2944`.
+
+### Dev scores, `scripts/evaluate.py` on `luna_v2_reval.jsonl`
+| Sheet | All | Rules part | Model part |
+|---|---|---|---|
+| Batch 1, tuned on | 18/30 | 1/1 | 17/29 |
+| Batch 3, not tuned on | 23/50 | 0/0 | 23/50 |
+| Both | 41/80 | 1/1 | 40/79 |
+
+- 29 of the 36 logic labels the model gave are right. Precision: business-logic-conflict 9/11, overlap-contamination 8/10, assignment-override 7/9, null-safety-conflict 3/3.
+- The classifier ended 44 of the 80 as unknown, 13 are unknown by hand. Reasons: 29 no-test-met, 9 validator-failed, 5 ambiguous, 1 out-of-scope.
+- Causes of the 39 misses (batch 1, batch 3): a label only a rule can write 8 and 15, the right test rejected by the validator 0 and 3, no test met or a structural hint although a logic label fits 1 and 6, the wrong logic test 3 and 3.
+- Of the 15 rule only misses in batch 3, 11 are disjoint-edits and 8 of those have an empty base (D19). The others are 2 one-side-change, 1 value-only-change and 1 rename.
+- Batch 2 is not scored, as before, because it was picked by text filters and gave the few shot examples.
+
+### No test labels in FYP-I
+- Agreed on 2026-11-15 for the report deadline: the model test sheet (201 to 250), the rules test sheet (301 to 350) and Aneeza's second set of labels for regions 61 to 70 are not filled in. The report gives the dev numbers as its results and lists the test scoring and the agreement check as FYP-II work.
+- The test split stays unused. All 100 test sheet regions already have a record in `luna_v2_reval.jsonl`, so the final scoring needs labels only and no model calls.
+
+### Two figures checked for the report
+- **Region size (Chapter 5).** "9.3 percent longer than one hundred lines" and "median of ten lines in TypeScript files" count the ours lines plus the theirs lines of a marker region, on the final dataset of 4,266 pull requests (54,641 regions). Recounted on 2026-11-15: 9.3 percent of all regions and 11.3 percent of the `.ts` and `.tsx` regions are over 100 lines, and the median is 9 for all and 10 for `.ts` and `.tsx`. On the eligible pool the same measure gives 8.6 and 10.3 percent, median 8 and 11.
+- **Lone JSX child (D18 follow up).** Recounted on the train and dev records of `luna_v2_reval.jsonl`: 1,313 answers have assignment-override as the first met test, 876 pass the validator, and 26 of those pass only because of a lone JSX child, with no named assignment, return type or slot with text around the braces behind them. 3 of the 26 hold a JSX comment (`devjohxylon/Buildrs#2` `src/app/page.tsx` index 7 and 8, `realsamrat/weblog#1` `app/posts/[slug]/page.tsx` index 9). The earlier counts (4 of 364, then 3 of 310) were taken on partial runs.
+
+### Still open after this entry
+- Token totals exist for Fatima's half only (16.10 million in, 6.35 million out). Aneeza's were printed per session and not kept.
+- The temporary shared run rule in `CLAUDE.md` is removed, as it says, now that the merged output is revalidated.
